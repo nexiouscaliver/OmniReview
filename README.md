@@ -26,7 +26,10 @@ No more "LGTM" reviews. No more missed security holes. No more "this was too sma
 
 ### Currently Supported
 
-- **GitLab** merge requests via `glab` CLI
+| Platform | Tool | Status |
+|----------|------|--------|
+| **GitLab** merge requests | `glab` CLI | Supported |
+| **Claude Code** (Anthropic) | Personal skills | Supported |
 
 ### Coming Soon
 
@@ -251,14 +254,14 @@ All posted comments are written as standard code review text — no AI attributi
 
 ---
 
-## Installation
+## Installation (Claude Code)
+
+OmniReview currently runs as a **Claude Code personal skill**. The installation places skill files into Claude Code's skills directory, where they are automatically picked up on the next session.
 
 ### Prerequisites
 
-Before installing OmniReview, make sure you have:
-
 1. **Claude Code** installed and working ([get it here](https://claude.ai/code))
-2. **glab CLI** installed and authenticated with your GitLab instance:
+2. **glab CLI** — required for GitLab MR support. Install and authenticate:
    ```bash
    # Install glab (macOS)
    brew install glab
@@ -266,7 +269,7 @@ Before installing OmniReview, make sure you have:
    # Install glab (Linux)
    # See: https://gitlab.com/gitlab-org/cli#installation
 
-   # Authenticate
+   # Authenticate with your GitLab instance
    glab auth login
    ```
 3. **Git** (version 2.15+ for worktree support)
@@ -280,10 +283,10 @@ Before installing OmniReview, make sure you have:
 # 1. Clone the OmniReview repository
 git clone https://github.com/nexiouscaliver/OmniReview.git
 
-# 2. Create the skills directory (if it doesn't exist)
+# 2. Create the Claude Code skills directory (if it doesn't exist)
 mkdir -p ~/.claude/skills/omnireview
 
-# 3. Copy the skill files
+# 3. Copy the skill files into Claude Code
 cp OmniReview/SKILL.md \
    OmniReview/mr-analyst-prompt.md \
    OmniReview/codebase-reviewer-prompt.md \
@@ -291,7 +294,7 @@ cp OmniReview/SKILL.md \
    OmniReview/consolidation-guide.md \
    ~/.claude/skills/omnireview/
 
-# 4. Verify installation
+# 4. Verify the files are in place
 ls ~/.claude/skills/omnireview/
 # Should show: SKILL.md, mr-analyst-prompt.md, codebase-reviewer-prompt.md,
 #              security-reviewer-prompt.md, consolidation-guide.md
@@ -303,7 +306,7 @@ rm -rf OmniReview
 #### Option B: Direct Download
 
 ```bash
-# Create directory and download files directly
+# Create Claude Code skills directory and download files directly
 mkdir -p ~/.claude/skills/omnireview && cd ~/.claude/skills/omnireview
 
 for file in SKILL.md mr-analyst-prompt.md codebase-reviewer-prompt.md \
@@ -312,9 +315,11 @@ for file in SKILL.md mr-analyst-prompt.md codebase-reviewer-prompt.md \
 done
 ```
 
-### Verify Installation
+### After Installation
 
-Open Claude Code in any GitLab repository and type:
+**Restart your Claude Code session** for the new skill to be detected. Claude Code loads skills at session start — any running session won't see the skill until restarted.
+
+Once restarted, open Claude Code in any GitLab repository and type:
 
 ```
 /omnireview
@@ -373,6 +378,7 @@ OmniReview/
 
 ## Roadmap
 
+- [x] Claude Code support (personal skill)
 - [x] GitLab MR review via `glab` CLI
 - [x] 3 parallel agents with worktree isolation
 - [x] Confidence scoring and cross-correlation
