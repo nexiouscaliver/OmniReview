@@ -1,0 +1,416 @@
+---
+name: omnireview
+description: Use when reviewing a GitLab merge request, performing code review on an MR, checking MR security, or when given a GitLab MR number or URL to review
+---
+
+# OmniReview
+
+> **Multi-agent adversarial MR review — 3 parallel agents, 3 worktrees, 1 consolidated report.**
+
+Dispatch 3 parallel specialized agents in isolated git worktrees to perform adversarial, independent analysis of a GitLab MR. Consolidate findings via confidence scoring, present actionable report, then offer structured actions (comment, create issues, approve).
+
+**Core principle:** Independent adversarial review + confidence filtering + worktree isolation = high-signal feedback with minimal noise.
+
+**Announce at start:** "I'm using OmniReview to review MR !{id}."
+
+## Prerequisites
+
+- `glab` CLI authenticated (`glab auth status` to verify)
+- Git repository with remote pointing to GitLab
+- Current working directory is in the git repo
+
+## Input Parsing
+
+Accept any of: MR number (`136`), prefixed (`!136`), or full GitLab URL.
+Extract MR ID. If URL provided, extract project path and MR IID.
+
+## The Process
+
+```dot
+digraph omnireview_flow {
+    rankdir=TB;
+    node [shape=box];
+
+    gather [label="Phase 1: Gather MR Data\nglab mr view + diff + comments"];
+    worktrees [label="Phase 2: Create 3 Worktrees\n(on MR source branch)"];
+    dispatch [label="Phase 3: Dispatch 3 OmniReview Agents\nIN PARALLEL"];
+    analyst [label="MR Analyst (OmniReview)\n(worktree 1)"];
+    codebase [label="Codebase Reviewer (OmniReview)\n(worktree 2)"];
+    security [label="Security Reviewer (OmniReview)\n(worktree 3)"];
+    consolidate [label="Phase 4: Consolidation\nconfidence scoring + cross-correlation"];
+    report [label="Phase 5: Present Report\n(NEVER auto-post)"];
+    action [label="Phase 6: Action Menu\n(user chooses)"];
+    cleanup [label="Phase 7: Cleanup\n(ALWAYS runs)"];
+
+    gather -> worktrees -> dispatch;
+    dispatch -> analyst;
+    dispatch -> codebase;
+    dispatch -> security;
+    analyst -> consolidate;
+    codebase -> consolidate;
+    security -> consolidate;
+    consolidate -> report -> action -> cleanup;
+}
+```
+
+---
+
+## Phase 1: Gather MR Data
+
+Fetch ALL data before dispatching agents. Agents get data injected — they never re-fetch.
+
+```bash
+# 1. Verify glab is authenticated
+glab auth status
+
+# 2. MR metadata (JSON for structured parsing)
+MR_JSON=$(glab mr view {id} -F json)
+
+# 3. MR with all comments and discussions
+MR_COMMENTS=$(glab mr view {id} -c)
+
+# 4. Raw diff
+MR_DIFF=$(glab mr diff {id} --raw)
+
+# 5. Extract source/target branches from JSON, then get commit list
+git fetch origin {source_branch}
+COMMITS=$(git log --oneline origin/{target_branch}..origin/{source_branch})
+```
+
+Construct context package:
+- MR title, description, labels, assignees, reviewers
+- All discussion threads (resolved and unresolved)
+- Full diff (raw)
+- Commit list with messages and SHAs
+- Source branch, target branch, pipeline status
+- List of files changed
+
+**If diff is too large (>10000 lines as measured by `glab mr diff {id} --raw | wc -l`):** Summarize the diff and provide agents with the file list only. Each agent explores full files in their worktree.
+
+---
+
+## Phase 2: Create 3 Worktrees
+
+**REQUIRED SUB-SKILL:** Follow `superpowers:using-git-worktrees` pattern.
+
+```bash
+# Ensure .worktrees/ exists and is in .gitignore
+mkdir -p .worktrees
+git check-ignore -q .worktrees 2>/dev/null || echo ".worktrees/" >> .gitignore
+
+# Clean up any stale worktrees from a previous crashed OmniReview run
+git worktree remove .worktrees/omni-analyst-{id} --force 2>/dev/null
+git worktree remove .worktrees/omni-codebase-{id} --force 2>/dev/null
+git worktree remove .worktrees/omni-security-{id} --force 2>/dev/null
+git worktree prune
+
+# Fetch MR source branch
+git fetch origin {source_branch}
+
+# Create 3 worktrees on the MR source branch
+git worktree add .worktrees/omni-analyst-{id} origin/{source_branch} --detach
+git worktree add .worktrees/omni-codebase-{id} origin/{source_branch} --detach
+git worktree add .worktrees/omni-security-{id} origin/{source_branch} --detach
+```
+
+Use `--detach` to avoid branch name conflicts. Each agent gets full repo at the MR's HEAD.
+
+**IMPORTANT:** Convert worktree paths to absolute paths before injecting into agent prompts:
+```bash
+ANALYST_PATH=$(cd .worktrees/omni-analyst-{id} && pwd)
+CODEBASE_PATH=$(cd .worktrees/omni-codebase-{id} && pwd)
+SECURITY_PATH=$(cd .worktrees/omni-security-{id} && pwd)
+```
+
+---
+
+## Phase 3: Dispatch 3 OmniReview Agents in Parallel
+
+**REQUIRED SUB-SKILL:** Use `superpowers:dispatching-parallel-agents` pattern.
+
+Dispatch all 3 agents simultaneously using the **Agent tool** (NOT TaskCreate — the Agent tool spawns subagents). Send a single message with 3 parallel Agent tool calls. Each agent gets:
+- Full MR context package (injected, NOT fetched by agent)
+- Its own worktree **absolute** path for exploration
+- Agent-specific review prompt (from template file)
+- MR comments/discussions (all 3 agents, not just the MR Analyst)
+- Confidence scoring instructions
+
+### Agent 1: MR Analyst (OmniReview)
+- **Template:** `./mr-analyst-prompt.md`
+- **Worktree:** `.worktrees/omni-analyst-{id}`
+- **Focus:** Process quality — commit-by-commit analysis, MR description, discussions, scope
+
+### Agent 2: Codebase Reviewer (OmniReview)
+- **Template:** `./codebase-reviewer-prompt.md`
+- **Worktree:** `.worktrees/omni-codebase-{id}`
+- **Focus:** Code quality — architecture, logic, testing, patterns, DRY, performance
+
+### Agent 3: Security Reviewer (OmniReview)
+- **Template:** `./security-reviewer-prompt.md`
+- **Worktree:** `.worktrees/omni-security-{id}`
+- **Focus:** Security — OWASP Top 10, secrets, auth/authz, injection, data exposure
+
+**Model selection:** Use the most capable model available (opus) for all 3 agents. Review requires judgment, not just mechanical work.
+
+### Agent Prompt Construction
+
+For each agent, fill the template placeholders:
+- `{MR_ID}` — MR number
+- `{MR_TITLE}` — MR title from JSON
+- `{WORKTREE_PATH}` — **Absolute** path to agent's worktree (convert from relative)
+- `{MR_JSON_DATA}` — Full JSON metadata (all 3 agents get this)
+- `{MR_DESCRIPTION}` — MR description text
+- `{MR_COMMENTS}` — All discussion threads (all 3 agents get this — discussions may contain security/code context)
+- `{MR_DIFF}` — Raw diff output
+- `{COMMIT_LIST}` — Commit SHAs and messages
+- `{FILES_CHANGED_LIST}` — List of changed file paths
+- `{SOURCE_BRANCH}` — MR source branch name
+- `{TARGET_BRANCH}` — MR target branch name
+
+---
+
+## Phase 4: Consolidation
+
+Follow `./consolidation-guide.md` for the full algorithm.
+
+### Confidence Scoring
+
+Each agent assigns confidence (0-100) per finding:
+
+| Score | Meaning | Threshold |
+|-------|---------|-----------|
+| 90-100 | Verified with code evidence | Include |
+| 70-89 | Strong signal, likely real | Include |
+| 50-69 | Possible, needs judgment | Filtered out |
+| < 50 | Noise | Filtered out |
+
+**Threshold: 70.** Only findings >= 70 appear in the final report.
+
+### Cross-Correlation
+
+- Same area flagged by 2 agents: **+15 confidence** (cap 100)
+- Same area flagged by 3 agents: **+25 confidence** (cap 100)
+- Contradictory findings: Present both, mark "needs human judgment"
+
+### False Positive Auto-Reduction (-30 confidence)
+
+- Pre-existing issues (code predates this MR per `git blame`)
+- Linter/CI-catchable issues
+- Pure style nitpicks without functional impact
+- Issues already resolved in MR discussions
+
+### Deduplication
+
+- Group by file:line proximity (within 5 lines = same area)
+- Merge overlapping findings, keep highest severity
+- Preserve unique insights from each agent
+
+---
+
+## Phase 5: Present Report
+
+```markdown
+## OmniReview Report: !{id} — {title}
+
+**Branch:** {source} → {target} | **Author:** {author} | **Pipeline:** {status}
+
+### Summary
+[1-3 sentence executive summary: overall assessment, key risks]
+
+### Verdict: [APPROVE | APPROVE_WITH_FIXES | REQUEST_CHANGES | BLOCK]
+
+### Strengths
+[Specific things done well with file:line references]
+
+### Issues
+
+#### Critical (Must Fix Before Merge)
+[Bugs, security vulnerabilities, data loss risks]
+Each: file:line | description | why it matters | how to fix | confidence | source agent(s)
+
+#### Important (Should Fix)
+[Architecture problems, missing edge cases, test gaps]
+
+#### Minor (Nice to Have)
+[Optimizations, documentation, code clarity]
+
+### MR Process Notes
+[From MR Analyst (OmniReview): commit quality, description, unresolved discussions]
+
+### Security Assessment
+[From Security Reviewer (OmniReview): OWASP findings, posture assessment]
+
+### Recommendations
+[Future improvements beyond this MR's scope]
+
+### Agent Agreement Matrix
+| File/Area | MR Analyst (OmniReview) | Codebase (OmniReview) | Security (OmniReview) | Consensus |
+```
+
+**CRITICAL: Present the report FIRST. Never auto-post anything.**
+
+---
+
+## Phase 6: Action Menu
+
+After presenting the full report, offer structured actions:
+
+```
+What would you like to do?
+
+1. Post summary as MR comment
+2. Post individual findings as inline discussion threads
+3. Create GitLab issues for Critical/Important items
+4. Approve the MR
+5. Open MR in browser
+6. Re-review a specific area (single focused agent)
+7. Verify a specific concern (run a targeted check)
+8. Done — no action needed
+```
+
+Wait for user choice. Execute chosen action(s). Return to menu until user selects "Done".
+
+### Action Commands
+
+| Action | Command |
+|--------|---------|
+| Summary comment | `glab mr note {id} -m "{summary}"` |
+| Inline discussion | `glab api projects/:fullpath/merge_requests/{iid}/discussions --method POST` with position data |
+| Create issue | `glab issue create -t "[MR !{id}] {title}" -d "{desc}"` |
+| Approve | `glab mr approve {id}` |
+| Open browser | `glab mr view {id} -w` |
+
+**No AI attribution in any posted content.** Write as a standard code review comment.
+
+---
+
+## Phase 7: Cleanup
+
+**ALWAYS runs, regardless of success or failure.**
+
+```bash
+# Remove worktrees
+git worktree remove .worktrees/omni-analyst-{id} --force 2>/dev/null
+git worktree remove .worktrees/omni-codebase-{id} --force 2>/dev/null
+git worktree remove .worktrees/omni-security-{id} --force 2>/dev/null
+
+# Clean up any leftover directories
+rm -rf .worktrees/omni-analyst-{id} .worktrees/omni-codebase-{id} .worktrees/omni-security-{id} 2>/dev/null
+
+# Prune stale worktree references
+git worktree prune
+```
+
+---
+
+## Error Handling
+
+| Error | Response |
+|-------|----------|
+| glab not authenticated | "Run `glab auth login` first." Stop. |
+| MR not found | "MR !{id} not found. Verify the number and repository." Stop. |
+| Network failure | Retry glab command once. If still fails, report error and stop. |
+| Worktree creation fails | Try with timestamp suffix. If still fails, clean up and stop. |
+| 1 agent fails | Continue with 2/3. Note gap in report. |
+| 2+ agents fail | Present partial results. Suggest manual review. |
+| Diff too large | Summarize diff. Give agents file list to explore in worktrees. |
+| Cleanup fails | Force remove directories. Report if still stuck. |
+
+**Cleanup guarantee:** The entire flow is wrapped in a try/finally pattern. Phase 7 runs no matter what.
+
+---
+
+## Quick Reference
+
+| Phase | What | How |
+|-------|------|-----|
+| 1. Gather | Fetch MR data | `glab mr view/diff` (JSON + raw) |
+| 2. Setup | Create 3 worktrees | `git worktree add --detach` (×3) |
+| 3. Review | Dispatch OmniReview agents | Agent tool parallel (×3, opus model) |
+| 4. Merge | Consolidate findings | Confidence score + cross-correlate + dedup |
+| 5. Report | Present OmniReview report | Structured markdown with verdict |
+| 6. Act | User chooses | `glab mr note/approve`, `glab issue create` |
+| 7. Clean | Remove worktrees | `git worktree remove --force` (×3) + prune |
+
+---
+
+## The "Small MR" Trap
+
+```
+EVERY MR gets the full OmniReview process. No exceptions.
+```
+
+The most dangerous rationalization is: "This MR is small/simple, I'll just do a quick review." This is exactly when issues get missed — when you assume simplicity means safety.
+
+**Baseline testing proved this.** Without OmniReview, an agent reviewing a "simple" 86-line CI/CD change:
+- Skipped worktree isolation ("unnecessary overhead")
+- Skipped parallel agents ("scope was small enough")
+- Skipped confidence scoring ("informal severity labels are fine")
+- Read the wrong branch (local instead of MR source)
+- Did no systematic security check (just "no issues found")
+
+A CI/CD file change can expose secrets, break production deployments, or modify security configurations. "Small" does not mean "safe."
+
+**The rule:** Every MR gets 3 OmniReview agents, 3 worktrees, confidence scoring, and the full report. The overhead is minutes. The cost of a missed issue is hours or days.
+
+---
+
+## Red Flags — STOP and Follow the Process
+
+| Thought | Reality |
+|---------|---------|
+| "This MR is too small for full review" | Small MRs in CI/CD, auth, or config are the most dangerous. Full process. |
+| "I'll just read the diff, no worktree needed" | The diff is insufficient. You need full file context. Create worktrees. |
+| "One agent can handle this" | You'll miss cross-perspective insights. Dispatch all 3. |
+| "I'll skip confidence scoring, findings are obvious" | "Obvious" findings are often false positives. Score everything. |
+| "Let me just post my comments now" | Present the report first. User decides what to post. |
+| "I can use the local branch instead of MR source" | The local branch may be stale or different. Always fetch and use MR source. |
+| "Security review isn't needed for this change" | Every change has security implications. Always run the security agent. |
+| "Cleanup can wait" | Stale worktrees accumulate. Clean up immediately. |
+| "The MR comments aren't relevant for code/security review" | Discussions often contain security context, design decisions, and known risks. Inject comments into ALL agents. |
+| "Relative paths are fine for worktrees" | Agents need absolute paths to reliably navigate. Always convert to absolute. |
+| "I'll use TaskCreate to track the agents" | TaskCreate tracks YOUR work. Use the Agent tool to dispatch subagents. Different tools, different purposes. |
+
+**All of these mean: Follow the 7-phase OmniReview process. No shortcuts.**
+
+---
+
+## Never
+
+- Use `gh` (this is GitLab — use `glab` exclusively)
+- Push to origin (user's rule: never push without explicit permission)
+- Post comments without user approval from the action menu
+- Approve MR without explicit user request
+- Skip worktree cleanup (even on failure)
+- Include findings below confidence threshold 70
+- Let agents share worktrees (isolation is critical)
+- Add AI attribution to posted comments (no "Generated by Claude" etc.)
+- Skip any of the 7 phases for any reason
+
+## Always
+
+- Fetch MR data in Phase 1 before dispatching agents
+- Create isolated worktrees per agent on the MR source branch
+- Inject context into agent prompts (don't make agents re-fetch)
+- Use confidence scoring with threshold 70
+- Cross-correlate findings across agents
+- Present full OmniReview report before any action
+- Ask user which actions to take via the action menu
+- Clean up all worktrees regardless of outcome
+- Use `glab` for all GitLab operations
+
+---
+
+## Integration
+
+**Uses:**
+- `superpowers:using-git-worktrees` — Worktree setup/teardown pattern
+- `superpowers:dispatching-parallel-agents` — Parallel dispatch pattern
+- `superpowers:requesting-code-review` — Review output format (Strengths/Issues/Assessment)
+- `superpowers:verification-before-completion` — Evidence-based findings
+
+**OmniReview Agent Templates:**
+- `./mr-analyst-prompt.md` — MR Analyst (OmniReview)
+- `./codebase-reviewer-prompt.md` — Codebase Reviewer (OmniReview)
+- `./security-reviewer-prompt.md` — Security Reviewer (OmniReview)
+- `./consolidation-guide.md` — Cross-correlation and report format
