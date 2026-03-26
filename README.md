@@ -29,7 +29,7 @@ No more "LGTM" reviews. No more missed security holes. No more "this was too sma
 | Platform | Tool | Status |
 |----------|------|--------|
 | **GitLab** merge requests | `glab` CLI | Supported |
-| **Claude Code** (Anthropic) | Personal skills | Supported |
+| **Claude Code** (Anthropic) | Plugin (marketplace) | Supported |
 
 ### Coming Soon
 
@@ -276,7 +276,7 @@ All posted comments are written as standard code review text — no AI attributi
 
 ## Installation (Claude Code)
 
-OmniReview currently runs as a **Claude Code personal skill**. The installation places skill files into Claude Code's skills directory, where they are automatically picked up on the next session.
+OmniReview is a **Claude Code plugin** distributed as its own marketplace. Installation takes two commands — add the marketplace, then install the plugin.
 
 ### Prerequisites
 
@@ -311,17 +311,42 @@ OmniReview currently runs as a **Claude Code personal skill**. The installation 
 
 #### Option A: Install as Plugin (Recommended)
 
-Since OmniReview follows the official Anthropic plugin format, you can install it directly from GitHub:
+Two commands in your terminal (outside Claude Code):
 
-```
-/plugin install omnireview@github:nexiouscaliver/OmniReview
+```bash
+# 1. Add OmniReview as a marketplace source
+claude plugin marketplace add https://github.com/nexiouscaliver/OmniReview.git
+
+# 2. Install the plugin
+claude plugin install omnireview@omnireview-marketplace
 ```
 
 This installs the skill, MCP server, and all agent templates in one step. Claude Code manages updates and uninstall automatically.
 
-#### Option B: Clone and Copy (Manual)
+To update later:
+```bash
+claude plugin marketplace update omnireview-marketplace
+claude plugin update omnireview
+```
 
-If you prefer a manual installation as a personal skill:
+To uninstall:
+```bash
+claude plugin uninstall omnireview
+claude plugin marketplace remove omnireview-marketplace
+```
+
+#### Option B: Load from Local Directory (Development/Testing)
+
+If you've cloned the repo locally and want to test without installing:
+
+```bash
+# Start Claude Code with OmniReview loaded for this session only
+claude --plugin-dir /path/to/OmniReview/plugins/omnireview
+```
+
+#### Option C: Manual Personal Skill (No MCP Server)
+
+If you prefer a manual installation as a personal skill (without the MCP tool server):
 
 ```bash
 # 1. Clone the OmniReview repository
@@ -330,49 +355,19 @@ git clone https://github.com/nexiouscaliver/OmniReview.git
 # 2. Create the Claude Code skills directory with references subdirectory
 mkdir -p ~/.claude/skills/omnireview/references
 
-# 3. Copy the skill file
-cp OmniReview/skills/omnireview/SKILL.md ~/.claude/skills/omnireview/
+# 3. Copy the skill and reference files
+cp OmniReview/plugins/omnireview/skills/omnireview/SKILL.md ~/.claude/skills/omnireview/
+cp OmniReview/plugins/omnireview/skills/omnireview/references/* ~/.claude/skills/omnireview/references/
 
-# 4. Copy the agent templates and consolidation guide
-cp OmniReview/skills/omnireview/references/* ~/.claude/skills/omnireview/references/
-
-# 5. Verify the files are in place
-ls -R ~/.claude/skills/omnireview/
-# Should show:
-#   SKILL.md
-#   references/
-#     mr-analyst-prompt.md
-#     codebase-reviewer-prompt.md
-#     security-reviewer-prompt.md
-#     consolidation-guide.md
-
-# 6. Clean up (optional)
+# 4. Clean up
 rm -rf OmniReview
 ```
 
-**Note:** Manual installation does not include the MCP tool server. The skill will fall back to running bash commands directly, which works but is slower and less error-handled.
-
-#### Option C: Direct Download (Manual)
-
-```bash
-# Create Claude Code skills directory structure
-mkdir -p ~/.claude/skills/omnireview/references
-
-# Download skill file
-curl -sO --output-dir ~/.claude/skills/omnireview \
-  "https://raw.githubusercontent.com/nexiouscaliver/OmniReview/main/skills/omnireview/SKILL.md"
-
-# Download reference files
-for file in mr-analyst-prompt.md codebase-reviewer-prompt.md \
-            security-reviewer-prompt.md consolidation-guide.md; do
-  curl -sO --output-dir ~/.claude/skills/omnireview/references \
-    "https://raw.githubusercontent.com/nexiouscaliver/OmniReview/main/skills/omnireview/references/$file"
-done
-```
+**Note:** Manual installation does not include the MCP tool server. The skill falls back to running bash commands directly, which works but is slower and less error-handled.
 
 ### After Installation
 
-**Restart your Claude Code session** for the plugin/skill to be detected. Claude Code loads plugins and skills at session start — any running session won't see OmniReview until restarted.
+**Restart your Claude Code session** for the plugin to be detected. Claude Code loads plugins at session start — any running session won't see OmniReview until restarted.
 
 Once restarted, open Claude Code in any GitLab repository and type:
 
@@ -418,34 +413,38 @@ Review MR !136
 ## Project Structure
 
 ```
-OmniReview/
+OmniReview/                                         # Marketplace root
   .claude-plugin/
-    plugin.json                     # Plugin metadata (name, version, author)
-  skills/
-    omnireview/
-      SKILL.md                      # Main orchestration (7-phase flow)
-      references/
-        mr-analyst-prompt.md        # MR Analyst agent template
-        codebase-reviewer-prompt.md # Codebase Reviewer agent template
-        security-reviewer-prompt.md # Security Reviewer agent template
-        consolidation-guide.md      # Cross-correlation and report format
-  .mcp.json                         # MCP server registration for Claude Code
-  tools/
-    omnireview_mcp_server.py        # Python MCP server (3 tools, FastMCP)
-    requirements.txt                # Python dependencies (mcp>=1.0.0)
-  tests/                            # Unit tests (mocked subprocess)
-  docs/                             # Design specs and implementation plans
-  README.md                         # This file
-  CONTRIBUTING.md                   # Contribution guidelines
-  CHANGELOG.md                      # Version history
-  LICENSE                           # MIT License
+    marketplace.json                                # Marketplace registry (lists plugins)
+  plugins/
+    omnireview/                                     # The plugin
+      .claude-plugin/
+        plugin.json                                 # Plugin metadata (name, version, author)
+      skills/
+        omnireview/
+          SKILL.md                                  # Main orchestration (7-phase flow)
+          references/
+            mr-analyst-prompt.md                    # MR Analyst agent template
+            codebase-reviewer-prompt.md             # Codebase Reviewer agent template
+            security-reviewer-prompt.md             # Security Reviewer agent template
+            consolidation-guide.md                  # Cross-correlation and report format
+      .mcp.json                                     # MCP server registration
+      tools/
+        omnireview_mcp_server.py                    # Python MCP server (3 tools, FastMCP)
+        requirements.txt                            # Python dependencies (mcp>=1.0.0)
+      tests/                                        # Unit tests (43 tests, mocked subprocess)
+  docs/                                             # Design specs and implementation plans
+  README.md                                         # This file
+  CONTRIBUTING.md                                   # Contribution guidelines
+  CHANGELOG.md                                      # Version history
+  LICENSE                                           # MIT License
 ```
 
 ---
 
 ## Roadmap
 
-- [x] Claude Code support (personal skill)
+- [x] Claude Code plugin (marketplace install)
 - [x] GitLab MR review via `glab` CLI
 - [x] 3 parallel agents with worktree isolation
 - [x] Confidence scoring and cross-correlation

@@ -53,19 +53,23 @@ For non-Anthropic developers. Your plugin goes into the `external_plugins/` sect
 - Once approved, appears in `/plugin > Discover` for all users
 - Your GitHub repo is the source of truth — Anthropic links to it via git SHA
 
-### Path B: Direct GitHub Installation
+### Path B: Self-Hosted Marketplace (Current Approach)
 
-Users can install directly from your GitHub repo without marketplace approval:
+OmniReview is distributed as its own marketplace. Users add the repo as a marketplace source, then install:
 
 ```bash
-/plugin install omnireview@github:nexiouscaliver/OmniReview
+# Add as marketplace
+claude plugin marketplace add https://github.com/nexiouscaliver/OmniReview.git
+
+# Install
+claude plugin install omnireview@omnireview-marketplace
 ```
 
-This works immediately but won't appear in the `/plugin > Discover` directory.
+This works immediately without Anthropic approval.
 
 ### Recommended: Start with Path B, then submit Path A
 
-Get the plugin working and stable via direct GitHub installation first. Once confident, submit to the official directory for broader discovery.
+Get the plugin working and stable via self-hosted marketplace first. Once confident, submit to the official directory for broader discovery.
 
 ---
 
@@ -120,58 +124,55 @@ plugin-name/
 
 ---
 
-## Current vs Target Structure
+## Current Structure (Completed)
 
-### Current (Personal Skill)
-
-```
-OmniReview/
-├── SKILL.md                        # Main skill
-├── mr-analyst-prompt.md            # Agent template
-├── codebase-reviewer-prompt.md     # Agent template
-├── security-reviewer-prompt.md     # Agent template
-├── consolidation-guide.md          # Reference doc
-├── README.md
-├── CONTRIBUTING.md
-├── LICENSE
-└── PLUGIN_CONVERSION_GUIDE.md     # This file
-```
-
-### Target (Plugin Format)
+The conversion from personal skill to marketplace plugin format is **complete**. The current structure is:
 
 ```
-OmniReview/
+OmniReview/                                         # Marketplace root
 ├── .claude-plugin/
-│   └── plugin.json                         # NEW
-├── skills/
-│   └── omnireview/
-│       ├── SKILL.md                        # MOVED from root
-│       └── references/
-│           ├── mr-analyst-prompt.md        # MOVED
-│           ├── codebase-reviewer-prompt.md # MOVED
-│           ├── security-reviewer-prompt.md # MOVED
-│           └── consolidation-guide.md      # MOVED
+│   └── marketplace.json                            # Marketplace registry
+├── plugins/
+│   └── omnireview/                                 # The plugin
+│       ├── .claude-plugin/
+│       │   └── plugin.json                         # Plugin metadata
+│       ├── skills/
+│       │   └── omnireview/
+│       │       ├── SKILL.md                        # Main skill (7-phase flow)
+│       │       └── references/
+│       │           ├── mr-analyst-prompt.md
+│       │           ├── codebase-reviewer-prompt.md
+│       │           ├── security-reviewer-prompt.md
+│       │           └── consolidation-guide.md
+│       ├── .mcp.json                               # MCP server registration
+│       ├── tools/
+│       │   ├── omnireview_mcp_server.py            # Python MCP server (3 tools)
+│       │   └── requirements.txt
+│       └── tests/                                  # 43 unit tests
 ├── README.md
 ├── CONTRIBUTING.md
+├── CHANGELOG.md
 ├── LICENSE
-├── CHANGELOG.md                            # NEW
-└── PLUGIN_CONVERSION_GUIDE.md
+└── PLUGIN_CONVERSION_GUIDE.md                      # This file
 ```
 
-### What Changes
+### What Was Changed (Historical Reference)
 
-1. **Add** `.claude-plugin/plugin.json`
-2. **Move** `SKILL.md` into `skills/omnireview/SKILL.md`
-3. **Move** all prompt templates into `skills/omnireview/references/`
-4. **Update** internal references in SKILL.md from `./mr-analyst-prompt.md` to `./references/mr-analyst-prompt.md`
-5. **Add** `argument-hint: <mr-number>` to SKILL.md frontmatter for slash command support
-6. **Add** `CHANGELOG.md`
+1. Added `.claude-plugin/marketplace.json` at repo root (marketplace registry)
+2. Created `plugins/omnireview/` subdirectory for the plugin
+3. Added `plugins/omnireview/.claude-plugin/plugin.json` (plugin metadata)
+4. Moved `SKILL.md` to `plugins/omnireview/skills/omnireview/SKILL.md`
+5. Moved all prompt templates to `plugins/omnireview/skills/omnireview/references/`
+6. Moved `.mcp.json` and `tools/` to `plugins/omnireview/`
+7. Updated all internal references in SKILL.md (`./` to `./references/`)
+8. Added `argument-hint` and `allowed-tools` to SKILL.md frontmatter
+9. Added `CHANGELOG.md`
 
 ---
 
 ## plugin.json — Complete Specification
 
-**Location:** `.claude-plugin/plugin.json`
+**Location:** `plugins/omnireview/.claude-plugin/plugin.json`
 
 This is the ONLY required file for a plugin. Without it, Claude Code won't recognize the directory as a plugin.
 
@@ -916,17 +917,20 @@ Your entry in `marketplace.json`:
 ## Installation by End Users
 
 ```bash
-# From official marketplace (after approval)
-/plugin install omnireview@claude-plugins-official
+# Self-hosted marketplace (works now)
+claude plugin marketplace add https://github.com/nexiouscaliver/OmniReview.git
+claude plugin install omnireview@omnireview-marketplace
 
-# From GitHub directly (works immediately, no approval needed)
-/plugin install omnireview@github:nexiouscaliver/OmniReview
+# From official Anthropic marketplace (after approval)
+claude plugin install omnireview@claude-plugins-official
 
 # Update
-/plugin update omnireview
+claude plugin marketplace update omnireview-marketplace
+claude plugin update omnireview
 
 # Uninstall
-/plugin uninstall omnireview
+claude plugin uninstall omnireview
+claude plugin marketplace remove omnireview-marketplace
 ```
 
 After installation, **restart Claude Code session**, then:
