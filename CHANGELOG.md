@@ -5,6 +5,24 @@ All notable changes to OmniReview will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-03-27
+
+### Added
+- `create_linked_issue` MCP tool — creates GitLab issues automatically linked to the source MR via `--linked-mr` flag
+- 5 new tests for issue creation (72 total)
+
+### Changed
+- MCP server now exposes 8 tools (was 7)
+- SKILL.md Phase 6 action commands table includes `create_linked_issue`
+- Bash fallback for issue creation now includes `--linked-mr` and `--no-editor` flags
+
+### Fixed
+- `_get_mr_diff_refs` returns structured error dict with JSON parse safety
+- `_post_inline_thread` checks `diff_refs.get("success")` instead of truthiness
+- Subprocess decode uses `errors="replace"` for non-UTF-8 resilience
+
+---
+
 ## [1.2.1] - 2026-03-26
 
 ### Added
