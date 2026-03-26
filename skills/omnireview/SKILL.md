@@ -1,6 +1,8 @@
 ---
 name: omnireview
 description: Use when reviewing a GitLab merge request, performing code review on an MR, checking MR security, or when given a GitLab MR number or URL to review
+argument-hint: <mr-number>
+allowed-tools: [Read, Glob, Grep, Bash, Agent, Write, Edit]
 ---
 
 # OmniReview
@@ -142,17 +144,17 @@ Dispatch all 3 agents simultaneously using the **Agent tool** (NOT TaskCreate �
 - Confidence scoring instructions
 
 ### Agent 1: MR Analyst (OmniReview)
-- **Template:** `./mr-analyst-prompt.md`
+- **Template:** `./references/mr-analyst-prompt.md`
 - **Worktree:** `.worktrees/omni-analyst-{id}`
 - **Focus:** Process quality — commit-by-commit analysis, MR description, discussions, scope
 
 ### Agent 2: Codebase Reviewer (OmniReview)
-- **Template:** `./codebase-reviewer-prompt.md`
+- **Template:** `./references/codebase-reviewer-prompt.md`
 - **Worktree:** `.worktrees/omni-codebase-{id}`
 - **Focus:** Code quality — architecture, logic, testing, patterns, DRY, performance
 
 ### Agent 3: Security Reviewer (OmniReview)
-- **Template:** `./security-reviewer-prompt.md`
+- **Template:** `./references/security-reviewer-prompt.md`
 - **Worktree:** `.worktrees/omni-security-{id}`
 - **Focus:** Security — OWASP Top 10, secrets, auth/authz, injection, data exposure
 
@@ -177,7 +179,7 @@ For each agent, fill the template placeholders:
 
 ## Phase 4: Consolidation
 
-Follow `./consolidation-guide.md` for the full algorithm.
+Follow `./references/consolidation-guide.md` for the full algorithm.
 
 ### Confidence Scoring
 
@@ -501,7 +503,7 @@ A CI/CD file change can expose secrets, break production deployments, or modify 
 - `superpowers:verification-before-completion` — Evidence-based findings
 
 **OmniReview Agent Templates:**
-- `./mr-analyst-prompt.md` — MR Analyst (OmniReview)
-- `./codebase-reviewer-prompt.md` — Codebase Reviewer (OmniReview)
-- `./security-reviewer-prompt.md` — Security Reviewer (OmniReview)
-- `./consolidation-guide.md` — Cross-correlation and report format
+- `./references/mr-analyst-prompt.md` — MR Analyst (OmniReview)
+- `./references/codebase-reviewer-prompt.md` — Codebase Reviewer (OmniReview)
+- `./references/security-reviewer-prompt.md` — Security Reviewer (OmniReview)
+- `./references/consolidation-guide.md` — Cross-correlation and report format
