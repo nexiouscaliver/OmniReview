@@ -283,11 +283,13 @@ Wait for user choice. Execute chosen action(s). Return to menu until user select
 
 This is the most common action. It posts everything in one go:
 
-1. Post the **summary comment** (overview template below) as a top-level MR note via `glab mr note`
-2. For **EACH finding** with confidence >= 70, post a separate **inline discussion thread** on the relevant diff line via `glab api`
+1. Post the **summary comment** (overview template below) as a top-level MR note.
+2. For **EACH finding** with confidence >= 70, post a separate **inline discussion thread** on the relevant diff line.
 3. Report back: "Posted summary comment + {N} inline discussion threads"
 
 **Do NOT batch findings.** Each finding gets its own thread so the MR author can resolve them independently. Multiple threads on the same file = expected and encouraged.
+
+**Implementation:** Use the `mcp__omnireview__post_full_review` tool which handles the summary and all inline threads efficiently in a single tool call.
 
 ### Summary Comment Template
 

@@ -163,19 +163,22 @@ Each agent gets its own complete copy of your repository through [git worktrees]
 
 ### Built-in MCP Tool Server
 
-OmniReview includes a Python [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that runs as a local child process alongside Claude Code. Instead of executing 25+ individual shell commands for worktree management and MR data fetching, the MCP server exposes 3 dedicated tools that Claude calls directly:
+OmniReview includes a Python [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that runs as a local child process alongside Claude Code. Instead of executing 25+ individual shell commands for worktree management and MR data fetching, the MCP server exposes 6 dedicated tools that Claude calls directly:
 
 | Tool | What It Does | Replaces |
 |------|-------------|----------|
 | `fetch_mr_data` | Fetches MR metadata, comments, diff, commits, and file list in a single structured call | 6 separate `glab`/`git` commands |
 | `create_review_worktrees` | Atomically creates 3 isolated worktrees with stale cleanup, gitignore management, and absolute path resolution | 12 manual `git worktree` commands |
 | `cleanup_review_worktrees` | Force-removes all worktrees with fallback cleanup, guaranteed to leave no stale state | 7 cleanup commands |
+| `post_full_review` | Posts summary comment + inline discussion threads for all findings in one call | Manual GitLab API construction |
+| `post_review_summary` | Posts a top-level MR overview comment | `glab mr note` |
+| `post_inline_thread` | Posts an inline discussion thread on a specific diff line | Complex `glab api` POST calls |
 
-The MCP server is security-hardened:
-- All subprocess calls use `create_subprocess_exec` (argument list, no shell interpretation) to prevent injection
-- Input validation on every tool call — MR IDs must be numeric, repo paths must point to real git repos, branch names are sanitized
-- Timeouts on all subprocess calls (30-120 seconds) to prevent hangs
-- Large diffs are auto-truncated at 10,000 lines to prevent context overflow
+The MCP server is security-hardened and performance-optimized:
+- **Injection Protection:** All subprocess calls use `create_subprocess_exec` (argument list, no shell interpretation).
+- **Resilient Decoding:** Subprocess output uses `errors="replace"` to prevent crashes on non-UTF-8 characters.
+- **Efficient Posting:** `post_full_review` fetches MR metadata once and reuses it for all inline threads, drastically reducing API latency.
+- **Auto-Truncation:** Large diffs are capped at 10,000 lines to prevent context overflow while agents explore full files in worktrees.
 
 When Claude Code launches OmniReview, it automatically spawns the MCP server via `uv` (Python package runner), which resolves the `mcp` dependency on the fly — no manual package installation needed.
 
@@ -449,7 +452,7 @@ OmniReview/                                         # Marketplace root
 - [x] 3 parallel agents with worktree isolation
 - [x] Confidence scoring and cross-correlation
 - [x] 9-option post-review action menu
-- [x] MCP tool server (fetch_mr_data, create/cleanup worktrees)
+- [x] MCP tool server (fetch_mr_data, create/cleanup worktrees, posting tools)
 - [x] Security-hardened subprocess execution (no shell injection)
 - [ ] GitHub PR support via `gh` CLI
 - [ ] Cursor IDE integration

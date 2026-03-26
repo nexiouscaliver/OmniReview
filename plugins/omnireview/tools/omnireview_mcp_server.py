@@ -63,7 +63,7 @@ async def run_subprocess(args: list, cwd: str, timeout: int = 60):
         proc.kill()
         await proc.communicate()
         return _result(-1, "", "Command timed out")
-    return _result(proc.returncode, stdout.decode(), stderr.decode())
+    return _result(proc.returncode, stdout.decode(errors="replace"), stderr.decode(errors="replace"))
 
 
 # Alias for the public API name used in tests and callers
@@ -415,10 +415,23 @@ async def _get_mr_diff_refs(mr_id: str, repo_root: str) -> dict:
         ["glab", "mr", "view", mr_id, "-F", "json"], cwd=repo_root
     )
     if r.returncode != 0:
-        return None
-    metadata = json.loads(r.stdout)
+        return {
+            "success": False,
+            "error": f"Failed to fetch MR !{mr_id} metadata: {r.stderr}",
+            "error_type": "mr_not_found",
+        }
+    try:
+        metadata = json.loads(r.stdout)
+    except json.JSONDecodeError:
+        return {
+            "success": False,
+            "error": f"Failed to parse JSON from glab for MR !{mr_id}.",
+            "error_type": "parse_error",
+        }
+
     diff_refs = metadata.get("diff_refs", {})
     return {
+        "success": True,
         "base_sha": diff_refs.get("base_sha", ""),
         "head_sha": diff_refs.get("head_sha", ""),
         "start_sha": diff_refs.get("start_sha", ""),
@@ -472,11 +485,11 @@ async def _post_inline_thread(
 
     # Fetch diff refs (SHAs needed for position data)
     diff_refs = await _get_mr_diff_refs(mr_id, repo_root)
-    if not diff_refs:
+    if not diff_refs or not diff_refs.get("success"):
         return {
             "success": False,
-            "error": f"Could not fetch diff refs for MR !{mr_id}.",
-            "error_type": "mr_not_found",
+            "error": diff_refs.get("error", f"Could not fetch diff refs for MR !{mr_id}.") if diff_refs else f"Could not fetch diff refs for MR !{mr_id}.",
+            "error_type": diff_refs.get("error_type", "mr_not_found") if diff_refs else "mr_not_found",
         }
 
     # glab api uses :fullpath placeholder which auto-resolves to the project path
