@@ -10,7 +10,7 @@
     {
       "name": "omnireview",
       "description": "Multi-agent adversarial merge request review — 3 parallel agents, 3 worktrees, 1 consolidated report for GitLab MRs",
-      "source": ".",
+      "source": "./plugins/omnireview",
       "category": "development",
       "homepage": "https://github.com/nexiouscaliver/OmniReview"
     }
