@@ -161,6 +161,26 @@ Each agent gets its own complete copy of your repository through [git worktrees]
 - Your working directory is never touched
 - Everything is cleaned up automatically when the review finishes
 
+### Built-in MCP Tool Server
+
+OmniReview includes a Python [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that runs as a local child process alongside Claude Code. Instead of executing 25+ individual shell commands for worktree management and MR data fetching, the MCP server exposes 3 dedicated tools that Claude calls directly:
+
+| Tool | What It Does | Replaces |
+|------|-------------|----------|
+| `fetch_mr_data` | Fetches MR metadata, comments, diff, commits, and file list in a single structured call | 6 separate `glab`/`git` commands |
+| `create_review_worktrees` | Atomically creates 3 isolated worktrees with stale cleanup, gitignore management, and absolute path resolution | 12 manual `git worktree` commands |
+| `cleanup_review_worktrees` | Force-removes all worktrees with fallback cleanup, guaranteed to leave no stale state | 7 cleanup commands |
+
+The MCP server is security-hardened:
+- All subprocess calls use `create_subprocess_exec` (argument list, no shell interpretation) to prevent injection
+- Input validation on every tool call — MR IDs must be numeric, repo paths must point to real git repos, branch names are sanitized
+- Timeouts on all subprocess calls (30-120 seconds) to prevent hangs
+- Large diffs are auto-truncated at 10,000 lines to prevent context overflow
+
+When Claude Code launches OmniReview, it automatically spawns the MCP server via `uv` (Python package runner), which resolves the `mcp` dependency on the fly — no manual package installation needed.
+
+**Note:** The MCP server is optional. If you install OmniReview as a personal skill (without the `.mcp.json`), the skill falls back to running the equivalent bash commands directly. The MCP server just makes the process faster, more reliable, and better error-handled.
+
 ---
 
 ## The Report
@@ -261,7 +281,19 @@ OmniReview currently runs as a **Claude Code personal skill**. The installation 
 ### Prerequisites
 
 1. **Claude Code** installed and working ([get it here](https://claude.ai/code))
-2. **glab CLI** — required for GitLab MR support. Install and authenticate:
+2. **uv** (Python package runner) — required for the MCP tool server. Install if not already present:
+   ```bash
+   # Install uv (macOS/Linux)
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+
+   # Or via Homebrew (macOS)
+   brew install uv
+
+   # Verify installation
+   uv --version
+   ```
+   The MCP server uses `uv run --with mcp[cli]` to auto-resolve Python dependencies at runtime — no manual `pip install` needed.
+3. **glab CLI** — required for GitLab MR support. Install and authenticate:
    ```bash
    # Install glab (macOS)
    brew install glab
@@ -272,8 +304,8 @@ OmniReview currently runs as a **Claude Code personal skill**. The installation 
    # Authenticate with your GitLab instance
    glab auth login
    ```
-3. **Git** (version 2.15+ for worktree support)
-4. A **GitLab repository** cloned locally
+4. **Git** (version 2.15+ for worktree support)
+5. A **GitLab repository** cloned locally
 
 ### Step-by-Step Installation
 
@@ -369,6 +401,11 @@ OmniReview/
   codebase-reviewer-prompt.md     # Codebase Reviewer agent template
   security-reviewer-prompt.md     # Security Reviewer agent template
   consolidation-guide.md          # Cross-correlation and report format
+  .mcp.json                       # MCP server registration for Claude Code
+  tools/
+    omnireview_mcp_server.py      # Python MCP server (3 tools, FastMCP)
+    requirements.txt              # Python dependencies (mcp>=1.0.0)
+  tests/                          # Unit tests (40 tests, mocked subprocess)
   README.md                       # This file
   CONTRIBUTING.md                 # Contribution guidelines
   LICENSE                         # MIT License
@@ -383,6 +420,8 @@ OmniReview/
 - [x] 3 parallel agents with worktree isolation
 - [x] Confidence scoring and cross-correlation
 - [x] 9-option post-review action menu
+- [x] MCP tool server (fetch_mr_data, create/cleanup worktrees)
+- [x] Security-hardened subprocess execution (no shell injection)
 - [ ] GitHub PR support via `gh` CLI
 - [ ] Cursor IDE integration
 - [ ] Gemini CLI agent compatibility
