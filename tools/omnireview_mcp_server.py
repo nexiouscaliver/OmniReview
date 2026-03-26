@@ -118,3 +118,89 @@ def truncate_diff_if_needed(diff_text: str, line_count: int) -> tuple:
         f"showing first {MAX_DIFF_LINES}] ..."
     )
     return truncated, True
+
+
+# ── Tool Implementations ──────────────────────────────────
+
+
+async def _fetch_mr_data(mr_id: str, repo_root: str) -> dict:
+    """Fetch all GitLab MR data in a single call."""
+    try:
+        mr_id = validate_mr_id(mr_id)
+        repo_root = validate_repo_root(repo_root)
+    except ValueError as e:
+        return {"success": False, "error": str(e), "error_type": "validation_error"}
+
+    # Verify glab auth
+    auth = await run_exec(["glab", "auth", "status"], cwd=repo_root)
+    if auth.returncode != 0:
+        return {
+            "success": False,
+            "error": "glab not authenticated. Run 'glab auth login'.",
+            "error_type": "auth_failure",
+        }
+
+    # Fetch MR metadata (JSON)
+    mr_json = await run_exec(
+        ["glab", "mr", "view", mr_id, "-F", "json"], cwd=repo_root
+    )
+    if mr_json.returncode != 0:
+        return {
+            "success": False,
+            "error": f"MR !{mr_id} not found.",
+            "error_type": "mr_not_found",
+        }
+    metadata = json.loads(mr_json.stdout)
+
+    # Fetch comments (default to empty on failure)
+    comments_r = await run_exec(
+        ["glab", "mr", "view", mr_id, "-c"], cwd=repo_root
+    )
+    comments = comments_r.stdout if comments_r.returncode == 0 else ""
+
+    # Fetch diff (longer timeout)
+    diff_r = await run_exec(
+        ["glab", "mr", "diff", mr_id, "--raw"], cwd=repo_root, timeout=120
+    )
+    raw_diff = diff_r.stdout if diff_r.returncode == 0 else ""
+    diff_lines = raw_diff.count('\n')
+
+    # Extract branches
+    source_branch = metadata.get("source_branch", "")
+    target_branch = metadata.get("target_branch", "")
+
+    # Fetch both branches and get commit list
+    await run_exec(
+        ["git", "fetch", "origin", source_branch, target_branch],
+        cwd=repo_root,
+        timeout=120,
+    )
+    commits_r = await run_exec(
+        ["git", "log", "--oneline",
+         f"origin/{target_branch}..origin/{source_branch}"],
+        cwd=repo_root,
+    )
+
+    files_changed = extract_changed_files(raw_diff)
+    diff_text, diff_truncated = truncate_diff_if_needed(raw_diff, diff_lines)
+
+    return {
+        "success": True,
+        "mr_id": mr_id,
+        "title": metadata.get("title", ""),
+        "author": metadata.get("author", {}).get("username", ""),
+        "source_branch": source_branch,
+        "target_branch": target_branch,
+        "pipeline_status": metadata.get("pipeline_status", "unknown"),
+        "description": metadata.get("description", ""),
+        "comments": comments,
+        "diff": diff_text,
+        "diff_line_count": diff_lines,
+        "diff_too_large": diff_lines > MAX_DIFF_LINES,
+        "diff_truncated": diff_truncated,
+        "commits": parse_commits(commits_r.stdout),
+        "files_changed": files_changed,
+        "labels": metadata.get("labels", []),
+        "assignees": [a.get("username", "") for a in metadata.get("assignees", [])],
+        "reviewers": [r.get("username", "") for r in metadata.get("reviewers", [])],
+    }
