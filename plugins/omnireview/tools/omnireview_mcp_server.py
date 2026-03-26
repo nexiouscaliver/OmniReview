@@ -108,6 +108,71 @@ def parse_commits(log_output: str) -> list:
     return commits
 
 
+def parse_diff_line_map(diff_text: str) -> dict:
+    """Parse unified diff and return changed line numbers per file.
+
+    Returns a dict keyed by file path, each containing:
+      - added_lines: list of line numbers that were added (+ lines)
+      - all_new_lines: list of all line numbers visible in the new file
+        (context + added, excludes deleted lines)
+      - hunks: list of {new_start, new_count} for each hunk
+
+    Line numbers refer to the NEW version of the file (what GitLab's
+    position[new_line] expects for inline discussion threads).
+    """
+    if not diff_text or not diff_text.strip():
+        return {}
+
+    result = {}
+    current_file = None
+    new_line_num = 0
+
+    for line in diff_text.split('\n'):
+        # New file header: +++ b/path/to/file
+        if line.startswith('+++ b/'):
+            current_file = line[6:]
+            if current_file not in result:
+                result[current_file] = {
+                    "added_lines": [],
+                    "all_new_lines": [],
+                    "hunks": [],
+                }
+
+        # Hunk header: @@ -old_start,old_count +new_start,new_count @@
+        elif line.startswith('@@') and current_file:
+            # Parse +new_start,new_count
+            parts = line.split('+')[1].split('@@')[0].strip()
+            if ',' in parts:
+                new_start, new_count = parts.split(',')
+            else:
+                new_start, new_count = parts, '1'
+            new_start = int(new_start)
+            new_count = int(new_count)
+            new_line_num = new_start
+            result[current_file]["hunks"].append({
+                "new_start": new_start,
+                "new_count": new_count,
+            })
+
+        # Added line (exists in new file)
+        elif line.startswith('+') and not line.startswith('+++') and current_file:
+            result[current_file]["added_lines"].append(new_line_num)
+            result[current_file]["all_new_lines"].append(new_line_num)
+            new_line_num += 1
+
+        # Deleted line (only in old file — does NOT advance new line counter)
+        elif line.startswith('-') and not line.startswith('---') and current_file:
+            pass  # deleted lines don't exist in new file
+
+        # Context line (unchanged, exists in both)
+        elif current_file and not line.startswith('\\') and not line.startswith('diff ') and not line.startswith('index ') and not line.startswith('---'):
+            if new_line_num > 0:  # only if we're inside a hunk
+                result[current_file]["all_new_lines"].append(new_line_num)
+                new_line_num += 1
+
+    return result
+
+
 def truncate_diff_if_needed(diff_text: str, line_count: int) -> tuple:
     """Truncate diff if it exceeds MAX_DIFF_LINES."""
     if line_count <= MAX_DIFF_LINES:
@@ -184,6 +249,7 @@ async def _fetch_mr_data(mr_id: str, repo_root: str) -> dict:
 
     files_changed = extract_changed_files(raw_diff)
     diff_text, diff_truncated = truncate_diff_if_needed(raw_diff, diff_lines)
+    diff_line_map = parse_diff_line_map(raw_diff)
 
     return {
         "success": True,
@@ -199,6 +265,7 @@ async def _fetch_mr_data(mr_id: str, repo_root: str) -> dict:
         "diff_line_count": diff_lines,
         "diff_too_large": diff_lines > MAX_DIFF_LINES,
         "diff_truncated": diff_truncated,
+        "diff_line_map": diff_line_map,
         "commits": parse_commits(commits_r.stdout),
         "files_changed": files_changed,
         "labels": metadata.get("labels", []),
@@ -619,6 +686,21 @@ async def post_full_review(
             "error_type": "validation_error",
         }, indent=2)
     result = await _post_full_review(mr_id, summary, findings_list, repo_root)
+    return json.dumps(result, indent=2)
+
+
+@mcp_server.tool()
+async def map_diff_lines(diff_text: str) -> str:
+    """Parse a unified diff and return exact changed line numbers per file.
+
+    Use this to find valid line numbers for posting inline discussion threads.
+    Returns a map of file paths to their added lines, all visible lines, and hunk ranges.
+    The line numbers are for the NEW version of the file (what GitLab expects).
+
+    Args:
+        diff_text: Raw unified diff text (from fetch_mr_data response's "diff" field)
+    """
+    result = parse_diff_line_map(diff_text)
     return json.dumps(result, indent=2)
 
 
