@@ -1,0 +1,6 @@
+{
+  "omnireview": {
+    "command": "python3",
+    "args": ["${CLAUDE_PLUGIN_ROOT}/tools/omnireview_mcp_server.py"]
+  }
+}
