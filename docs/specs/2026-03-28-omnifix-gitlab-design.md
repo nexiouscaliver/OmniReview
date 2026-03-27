@@ -616,3 +616,166 @@ allowed-tools: [Read, Glob, Grep, Bash, Agent, Write, Edit]
 - `glab` CLI authenticated
 - Git 2.15+ (worktree support)
 - Project test command (auto-detected or from CLAUDE.md)
+
+---
+
+## Spec Review Fixes (from code review)
+
+### C1: Pagination in `fetch_mr_discussions`
+
+The GitLab API returns paginated results (20-100 per page). A single `glab api` call could silently truncate discussions.
+
+**Fix:** Use `--paginate` flag with `glab api` which auto-paginates and concatenates all pages:
+```
+glab api projects/:fullpath/merge_requests/{iid}/discussions --paginate
+```
+This returns the complete discussion list regardless of count. The `--paginate` flag is supported by glab 1.30+.
+
+### C2: Fix worktree must be on a branch (not detached HEAD)
+
+Phase 4 needs a writable worktree that can push to the source branch. Detached HEAD worktrees cannot push cleanly.
+
+**Fix:** Create the fix worktree on a tracking branch:
+```bash
+git fetch origin {source_branch}
+git worktree add .worktrees/omnifix-{mr_id} -b omnifix-temp-{mr_id} origin/{source_branch}
+```
+After committing in the worktree, push with:
+```bash
+git push origin omnifix-temp-{mr_id}:{source_branch}
+```
+Then clean up the temp branch:
+```bash
+git branch -D omnifix-temp-{mr_id}
+```
+
+### C3: Source branch race condition
+
+If the source branch advances between Phase 1 (GATHER) and Phase 6 (PUSH), pushing could fail or overwrite commits.
+
+**Fix:** Before pushing in Phase 6:
+1. `git fetch origin {source_branch}` in the fix worktree
+2. Compare `origin/{source_branch}` HEAD with the worktree's base commit
+3. If they differ:
+   - Warn user: "Source branch has {N} new commits since we started."
+   - Offer: (a) rebase fixes on new HEAD, (b) abort push, (c) create a separate MR with the fixes
+4. **Never force-push.** If rebase has conflicts, abort and let user resolve manually.
+
+### I1: Worktree naming and cleanup
+
+OmniFix uses `omnifix-*` prefix, existing cleanup tool only handles `omni-analyst/codebase/security-*`.
+
+**Fix:** Add a new `cleanup_omnifix_worktrees(mr_id, repo_root)` MCP tool that cleans:
+- `.worktrees/omnifix-{mr_id}` (fix worktree)
+- `.worktrees/omnifix-triage-{mr_id}-*` (triage worktrees)
+- The temp branch `omnifix-temp-{mr_id}`
+
+Also handle stale worktrees from previous crashed runs at the start of Phase 2 (same pattern as `create_review_worktrees`).
+
+### I3: Error handling in Phase 6 posting
+
+**Fix:** Phase 6 follows the `_post_full_review` pattern — collect errors per thread, continue with remaining, report summary:
+```
+Reply results: {N}/{M} succeeded
+Resolve results: {N}/{M} succeeded
+Errors: [list with discussion_id and error message]
+```
+Add retry-once for 5xx errors with 2-second delay.
+
+### I4: General findings (no file:line)
+
+**Fix:** Handle by type:
+- OmniReview summary comment (`individual_note: true`, `resolvable: false`) → **Skip** — not a fixable finding
+- Human general comment (`individual_note: true`, `resolvable: false`) → **Present as NEEDS_HUMAN** in Phase 3
+- Comment referencing code but missing position → Attempt to locate via grep in worktree, if found treat as inline; if not, present as NEEDS_HUMAN
+
+### I5: Auto-resolution etiquette
+
+**Fix:** Default behavior: reply with fix commit reference but do NOT auto-resolve. In Phase 3 (APPROVE), add option:
+```
+Auto-resolve fixed threads? (Recommended: No — let the original reviewer verify)
+1. Yes — resolve threads after posting fix reply
+2. No — only post fix reply, let reviewer resolve manually (default)
+```
+
+### I6: Test command discovery
+
+**Fix:** Discovery order:
+1. User passes `test_command` explicitly in invocation
+2. Check repo's `CLAUDE.md` for test commands
+3. Auto-detect:
+   - `package.json` with `test` script → `npm test` / `bun test`
+   - `pyproject.toml` or `pytest.ini` → `pytest`
+   - `Makefile` with `test` target → `make test`
+   - `Cargo.toml` → `cargo test`
+   - `go.mod` → `go test ./...`
+4. If none found → skip tests, warn user: "No test command detected. Fixes applied without testing."
+
+### M2: Commit message AI attribution
+
+**Fix:** Remove "Validated and applied by OmniFix." from commit template. Replace with:
+```
+fix: resolve {N} review findings from MR !{mr_id}
+
+Fixes:
+- .gitlab-ci.yml:1072 — Added placeholder mapping for STRIPE_PRICE_ENTERPRISE_STAGING
+- src/auth.py:45 — Added null check before user.id access
+```
+No mention of OmniFix, AI, or automation.
+
+### M3: Maximum findings limit
+
+**Fix:** Cap at 25 findings. If exceeded:
+```
+Found {N} unresolved findings (limit: 25).
+1. Process top 25 by severity
+2. Process all (may be slow and expensive)
+3. Select specific findings to process
+```
+
+### M4: OmniReview summary filtering
+
+**Fix:** Add test: `test_fetch_mr_discussions_skips_omnireview_summary` — verify that discussions with `individual_note: true` (top-level comments like the OmniReview summary) are classified as `type: "general"` and filtered appropriately.
+
+### M5: SKILL.md structure outline
+
+The SKILL.md will follow the same structure as `omnireview-gitlab`:
+```
+Frontmatter (name, description, argument-hint, allowed-tools)
+# OmniFix
+> Tagline
+## Prerequisites
+## Input Parsing
+## The Process (7-phase flowchart)
+## Phase 1: Gather (MCP tool calls)
+## Phase 2: Triage (subagent dispatch)
+## Phase 3: Approve (user gate with options)
+## Phase 4: Fix (implementer subagent)
+## Phase 5: Verify (verification subagent)
+## Phase 6: Commit + Post (push gate, reply, resolve)
+## Phase 7: Cleanup (always runs)
+## Error Handling (table)
+## Red Flags — STOP
+## Never / Always rules
+## Integration (references to templates and MCP tools)
+```
+
+### Additional: Dry-run mode
+
+Add `--dry-run` flag support: triage only, no worktrees for fixing, no code changes. Useful for previewing what would be fixed.
+
+### Additional: Atomic vs one-per-fix commits
+
+Default: single commit for all fixes (cleaner history). User can choose in Phase 3:
+```
+Commit strategy:
+1. Single commit for all fixes (default)
+2. One commit per fix (easier to revert individually)
+```
+
+### Additional: NEEDS_REWORK loop
+
+When Phase 5 verification returns NEEDS_REWORK:
+1. Present verifier's issues to user
+2. Options: (a) send back to fix agent with feedback (max 2 rework iterations), (b) proceed anyway, (c) abort
+3. After 2 rework iterations, escalate to user unconditionally
