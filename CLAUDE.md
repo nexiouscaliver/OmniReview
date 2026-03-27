@@ -4,22 +4,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-OmniReview is a Claude Code plugin distributed as its own marketplace. It dispatches 3 parallel AI review agents in isolated git worktrees to adversarially review GitLab merge requests, then consolidates findings via confidence scoring into a single report.
+OmniReview is a Claude Code plugin distributed as its own marketplace. It contains two skills:
+- **omnireview-gitlab** — dispatches 3 parallel AI review agents in isolated git worktrees to adversarially review GitLab MRs
+- **omnifix-gitlab** — automates fixing review findings with parallel triage subagents, sequential fixing, verification, and thread resolution
 
 ## Repository Layout
 
 This repo has two layers: the **marketplace root** and the **plugin** inside it.
 
 ```
-/                               ← Marketplace root (what Claude Code clones)
-  .claude-plugin/marketplace.json  ← Points to ./plugins/omnireview
-  plugins/omnireview/              ← THE PLUGIN (all runtime code lives here)
+/                                    ← Marketplace root
+  .claude-plugin/marketplace.json       ← Points to ./plugins/omnireview
+  plugins/omnireview/                   ← THE PLUGIN
     .claude-plugin/plugin.json
-    .mcp.json                      ← Spawns the MCP server via uv
-    skills/omnireview/SKILL.md     ← The skill Claude loads (7-phase workflow)
-    skills/omnireview/references/  ← Agent prompt templates + consolidation guide
-    tools/omnireview_mcp_server.py ← Python MCP server (FastMCP, 3 tools)
-    tests/                         ← 43 unit tests
+    .mcp.json                           ← Spawns the MCP server via uv
+    skills/
+      omnireview-gitlab/                ← Review skill (7-phase review workflow)
+        SKILL.md
+        references/                     ← 4 files: 3 agent prompts + consolidation guide
+      omnifix-gitlab/                   ← Fix skill (7-phase fix workflow)
+        SKILL.md
+        references/                     ← 3 files: triage, fix, verify agent prompts
+    tools/omnireview_mcp_server.py      ← Python MCP server (FastMCP, 12 tools)
+    tests/                              ← 92 unit tests
 ```
 
 The marketplace wrapper exists because `claude plugin marketplace add` requires plugins in subdirectories — it doesn't support a plugin at repo root.
@@ -33,7 +40,7 @@ cd plugins/omnireview && python -m pytest tests/ -v
 
 ### Run a single test
 ```bash
-cd plugins/omnireview && python -m pytest tests/test_worktrees.py::TestCleanupReviewWorktrees::test_rmtree_failure_reports_error -v
+cd plugins/omnireview && python -m pytest tests/test_discussions.py::TestFetchMrDiscussions::test_success -v
 ```
 
 ### Start MCP server manually (for testing)
@@ -54,44 +61,44 @@ claude plugin install omnireview@omnireview-marketplace
 
 ## Architecture
 
-### Two Runtime Paths
+### Two Skills
 
-The skill (SKILL.md) supports two modes for Phases 1, 2, and 7:
+**omnireview-gitlab** (review): Gather → Isolate → Dispatch 3 agents → Consolidate → Report → Act → Cleanup
+**omnifix-gitlab** (fix): Gather → Triage (parallel) → Approve → Fix → Verify → Post → Cleanup
 
-1. **MCP tools** (plugin install) — Claude calls `mcp__omnireview__fetch_mr_data`, `mcp__omnireview__create_review_worktrees`, `mcp__omnireview__cleanup_review_worktrees`. These are handled by `tools/omnireview_mcp_server.py`.
-
-2. **Bash fallback** (personal skill install without MCP) — SKILL.md contains equivalent bash commands using `glab` and `git` directly. Each MCP phase section has a "Fallback" block.
+Both skills support MCP tools (plugin install) with bash fallback (personal skill install).
 
 ### MCP Server (`tools/omnireview_mcp_server.py`)
 
-Single-file FastMCP server. The structure follows a pattern:
+Single-file FastMCP server with 12 tools. The structure follows a pattern:
 
 - **Validators** (`validate_mr_id`, `validate_repo_root`, `validate_branch_name`) — called at the top of every tool function
 - **`run_subprocess`** (aliased as `run_exec`) — all external commands go through this. Uses `create_subprocess_exec` (argument list, never shell), `stdin=DEVNULL` (prevents MCP pipe inheritance), and `asyncio.wait_for` timeout
-- **Helpers** (`extract_changed_files`, `parse_commits`, `truncate_diff_if_needed`) — pure functions for parsing
-- **Internal implementations** (`_fetch_mr_data`, `_create_review_worktrees`, `_cleanup_review_worktrees`) — async functions that do the actual work, return dicts
-- **FastMCP wrappers** (`fetch_mr_data`, etc.) — thin `@mcp_server.tool()` decorated functions that call internal implementations and `json.dumps` the result
+- **Helpers** (`extract_changed_files`, `parse_commits`, `truncate_diff_if_needed`, `parse_diff_line_map`) — pure functions for parsing
+- **Tool implementations** — async `_function` functions that do the actual work, return dicts
+- **FastMCP wrappers** — thin `@mcp_server.tool()` decorated functions that call internal implementations and `json.dumps` the result
 - **Entry point** — `mcp_server.run()` at the bottom
 
-### Skill Flow (SKILL.md)
+### 12 MCP Tools
 
-7 phases. Phases 3-6 are pure skill orchestration (no MCP tools):
-
-- Phase 1: Gather MR data → `mcp__omnireview__fetch_mr_data`
-- Phase 2: Create worktrees → `mcp__omnireview__create_review_worktrees`
-- Phase 3: Dispatch 3 agents in parallel (Agent tool, opus model)
-- Phase 4: Consolidate findings (confidence scoring, cross-correlation)
-- Phase 5: Present report (never auto-post)
-- Phase 6: Action menu (9 options, user chooses)
-- Phase 7: Cleanup → `mcp__omnireview__cleanup_review_worktrees`
-
-### Agent Prompt Templates (`skills/omnireview/references/`)
-
-Four files with `{PLACEHOLDER}` syntax. SKILL.md Phase 3 fills these with data from Phase 1 and injects them into Agent tool calls. All 3 agent templates receive the same 11 placeholders. The consolidation guide is referenced in Phase 4.
+| Tool | Used By |
+|------|---------|
+| `fetch_mr_data` | Review + Fix |
+| `create_review_worktrees` | Review |
+| `cleanup_review_worktrees` | Review |
+| `post_full_review` | Review |
+| `post_review_summary` | Review + Fix |
+| `post_inline_thread` | Review |
+| `create_linked_issue` | Review + Fix |
+| `map_diff_lines` | Review + Fix |
+| `fetch_mr_discussions` | Fix |
+| `reply_to_discussion` | Fix |
+| `resolve_discussion` | Fix |
+| `cleanup_omnifix_worktrees` | Fix |
 
 ### Key Invariant: `./references/` Paths
 
-SKILL.md references its supporting files as `./references/mr-analyst-prompt.md` etc. These paths are relative to `skills/omnireview/` (where SKILL.md lives), NOT relative to the repo root. If you move SKILL.md, the references break.
+Each SKILL.md references its supporting files as `./references/filename.md`. These paths are relative to the skill directory (where SKILL.md lives), NOT relative to the repo root. If you move SKILL.md, the references break.
 
 ## Testing
 

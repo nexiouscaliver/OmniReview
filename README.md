@@ -396,18 +396,21 @@ If you prefer a manual installation as a personal skill (without the MCP tool se
 # 1. Clone the OmniReview repository
 git clone https://github.com/nexiouscaliver/OmniReview.git
 
-# 2. Create the Claude Code skills directory with references subdirectory
-mkdir -p ~/.claude/skills/omnireview/references
+# 2. Install OmniReview (review skill)
+mkdir -p ~/.claude/skills/omnireview-gitlab/references
+cp OmniReview/plugins/omnireview/skills/omnireview-gitlab/SKILL.md ~/.claude/skills/omnireview-gitlab/
+cp OmniReview/plugins/omnireview/skills/omnireview-gitlab/references/* ~/.claude/skills/omnireview-gitlab/references/
 
-# 3. Copy the skill and reference files
-cp OmniReview/plugins/omnireview/skills/omnireview/SKILL.md ~/.claude/skills/omnireview/
-cp OmniReview/plugins/omnireview/skills/omnireview/references/* ~/.claude/skills/omnireview/references/
+# 3. Install OmniFix (fix skill)
+mkdir -p ~/.claude/skills/omnifix-gitlab/references
+cp OmniReview/plugins/omnireview/skills/omnifix-gitlab/SKILL.md ~/.claude/skills/omnifix-gitlab/
+cp OmniReview/plugins/omnireview/skills/omnifix-gitlab/references/* ~/.claude/skills/omnifix-gitlab/references/
 
 # 4. Clean up
 rm -rf OmniReview
 ```
 
-**Note:** Manual installation does not include the MCP tool server. The skill falls back to running bash commands directly, which works but is slower and less error-handled.
+**Note:** Manual installation does not include the MCP tool server. Skills fall back to running bash commands directly, which works but is slower and less error-handled.
 
 ### After Installation
 
@@ -465,18 +468,17 @@ OmniReview/                                         # Marketplace root
       .claude-plugin/
         plugin.json                                 # Plugin metadata (name, version, author)
       skills/
-        omnireview/
-          SKILL.md                                  # Main orchestration (7-phase flow)
-          references/
-            mr-analyst-prompt.md                    # MR Analyst agent template
-            codebase-reviewer-prompt.md             # Codebase Reviewer agent template
-            security-reviewer-prompt.md             # Security Reviewer agent template
-            consolidation-guide.md                  # Cross-correlation and report format
+        omnireview-gitlab/                          # Review skill (7-phase review flow)
+          SKILL.md
+          references/                               # 3 agent prompts + consolidation guide
+        omnifix-gitlab/                             # Fix skill (7-phase fix flow)
+          SKILL.md
+          references/                               # Triage, fix, verify agent prompts
       .mcp.json                                     # MCP server registration
       tools/
-        omnireview_mcp_server.py                    # Python MCP server (3 tools, FastMCP)
+        omnireview_mcp_server.py                    # Python MCP server (12 tools, FastMCP)
         requirements.txt                            # Python dependencies (mcp>=1.0.0)
-      tests/                                        # Unit tests (43 tests, mocked subprocess)
+      tests/                                        # Unit tests (92 tests, mocked subprocess)
   docs/                                             # Design specs and implementation plans
   README.md                                         # This file
   CONTRIBUTING.md                                   # Contribution guidelines
