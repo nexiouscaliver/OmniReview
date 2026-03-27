@@ -733,6 +733,52 @@ async def _fetch_mr_discussions(mr_id: str, repo_root: str) -> dict:
     }
 
 
+async def _reply_to_discussion(
+    mr_id: str, discussion_id: str, body: str, repo_root: str
+) -> dict:
+    """Post a reply to a specific discussion thread."""
+    try:
+        mr_id = validate_mr_id(mr_id)
+        repo_root = validate_repo_root(repo_root)
+    except ValueError as e:
+        return {"success": False, "error": str(e), "error_type": "validation_error"}
+
+    if not body or not body.strip():
+        return {"success": False, "error": "Reply body is empty.", "error_type": "validation_error"}
+
+    diff_refs = await _get_mr_diff_refs(mr_id, repo_root)
+    if not diff_refs or not diff_refs.get("success"):
+        return {
+            "success": False,
+            "error": diff_refs.get("error", f"Could not fetch MR !{mr_id}.") if diff_refs else f"Could not fetch MR !{mr_id}.",
+            "error_type": diff_refs.get("error_type", "mr_not_found") if diff_refs else "mr_not_found",
+        }
+    iid = diff_refs["iid"]
+
+    r = await run_exec(
+        [
+            "glab", "api",
+            f"projects/:fullpath/merge_requests/{iid}/discussions/{discussion_id}/notes",
+            "--method", "POST",
+            "--raw-field", f"body={body}",
+        ],
+        cwd=repo_root,
+    )
+    if r.returncode != 0:
+        return {
+            "success": False,
+            "error": f"Failed to reply: {r.stderr}",
+            "error_type": "post_failed",
+        }
+
+    return {
+        "success": True,
+        "mr_id": mr_id,
+        "discussion_id": discussion_id,
+        "action": "reply_posted",
+    }
+
+
 # ── FastMCP Server ────────────────────────────────────────
 
 from mcp.server.fastmcp import FastMCP
@@ -898,6 +944,22 @@ async def fetch_mr_discussions(mr_id: str, repo_root: str) -> str:
         repo_root: Absolute path to the git repository root
     """
     result = await _fetch_mr_discussions(mr_id, repo_root)
+    return json.dumps(result, indent=2)
+
+
+@mcp_server.tool()
+async def reply_to_discussion(
+    mr_id: str, discussion_id: str, body: str, repo_root: str
+) -> str:
+    """Post a reply to a specific discussion thread on a GitLab MR.
+
+    Args:
+        mr_id: Merge request number
+        discussion_id: The discussion thread ID to reply to
+        body: Reply text (markdown supported)
+        repo_root: Absolute path to the git repository root
+    """
+    result = await _reply_to_discussion(mr_id, discussion_id, body, repo_root)
     return json.dumps(result, indent=2)
 
 
