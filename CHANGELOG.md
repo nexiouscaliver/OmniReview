@@ -5,6 +5,25 @@ All notable changes to OmniReview will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-03-28
+
+### Added
+- **omnifix-gitlab** skill — automated review finding fixer with 7-phase pipeline:
+  triage (parallel subagents) → user approval → sequential fix → verify → commit + resolve
+- `fetch_mr_discussions` MCP tool — structured fetch of all discussion threads with
+  file:line positions, resolved status, replies, and pagination support
+- `reply_to_discussion` MCP tool — post replies to specific discussion threads
+- `resolve_discussion` MCP tool — resolve/unresolve discussion threads
+- `cleanup_omnifix_worktrees` MCP tool — clean up fix worktrees and temp branches
+- 3 subagent prompt templates: triage-agent, fix-agent, verify-agent
+- 20 new tests for discussion tools and cleanup (92 total)
+
+### Changed
+- MCP server now exposes 12 tools (was 8)
+- README updated with OmniFix section, expanded tools table, updated roadmap
+
+---
+
 ## [1.2.2] - 2026-03-27
 
 ### Added

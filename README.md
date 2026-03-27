@@ -89,6 +89,40 @@ The Security Reviewer thinks like an attacker. It systematically walks through t
 
 ---
 
+## OmniFix: Automated Finding Fixer
+
+OmniReview finds issues. **OmniFix fixes them.**
+
+The companion skill `omnifix-gitlab` automates the entire fix cycle after a review. It fetches unresolved discussion threads, validates each finding with parallel triage subagents, applies fixes with user approval, verifies changes, and posts resolution replies — all in a single command.
+
+```
+/omnifix-gitlab 136
+```
+
+### How OmniFix Works
+
+```
+Unresolved findings on MR !136
+    │
+    ├── Phase 1: Fetch all discussion threads
+    ├── Phase 2: Triage (parallel subagents validate each finding)
+    ├── Phase 3: User approves which to fix (mandatory gate)
+    ├── Phase 4: Fix agent applies changes sequentially
+    ├── Phase 5: Verification agent reviews all changes
+    ├── Phase 6: Commit, push, reply on threads, resolve discussions
+    └── Phase 7: Cleanup worktrees
+```
+
+**Key features:**
+- **Parallel triage** — N subagents validate N findings independently (VALID / INVALID / NEEDS_HUMAN)
+- **User approval gate** — no code changes without explicit consent
+- **Sequential fixing** — prevents file conflicts between overlapping fixes
+- **Verification agent** — fresh-eyes review catches regressions before commit
+- **Thread resolution** — replies "Fixed in {sha}" and optionally resolves discussions
+- **25-finding cap** — prevents runaway costs on large MRs
+
+---
+
 ## How It Works
 
 OmniReview follows a strict 7-phase process. Every merge request gets the full treatment — no shortcuts, no exceptions.
@@ -163,18 +197,22 @@ Each agent gets its own complete copy of your repository through [git worktrees]
 
 ### Built-in MCP Tool Server
 
-OmniReview includes a Python [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that runs as a local child process alongside Claude Code. Instead of executing 25+ individual shell commands for worktree management and MR data fetching, the MCP server exposes 8 dedicated tools that Claude calls directly:
+OmniReview includes a Python [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that runs as a local child process alongside Claude Code. The MCP server exposes **12 dedicated tools** that both skills (OmniReview + OmniFix) call directly:
 
-| Tool | What It Does | Replaces |
-|------|-------------|----------|
-| `fetch_mr_data` | Fetches MR metadata, comments, diff, commits, file list, and diff line map in a single structured call | 6 separate `glab`/`git` commands |
-| `create_review_worktrees` | Atomically creates 3 isolated worktrees with stale cleanup, gitignore management, and absolute path resolution | 12 manual `git worktree` commands |
-| `cleanup_review_worktrees` | Force-removes all worktrees with fallback cleanup, guaranteed to leave no stale state | 7 cleanup commands |
-| `post_full_review` | Posts summary comment + inline discussion threads for all findings in one call | Manual GitLab API construction |
-| `post_review_summary` | Posts a top-level MR overview comment | `glab mr note` |
-| `post_inline_thread` | Posts an inline discussion thread on a specific diff line with auto-fetched SHA position data | Complex `glab api` POST calls |
-| `create_linked_issue` | Creates a GitLab issue linked to the source MR via `--linked-mr`, with title, description, and labels | Manual `glab issue create` with flags |
-| `map_diff_lines` | Parses a diff and returns exact changed line numbers per file — ensures inline threads land on valid lines | Manual diff line counting |
+| Tool | What It Does | Used By |
+|------|-------------|---------|
+| `fetch_mr_data` | Fetches MR metadata, comments, diff, commits, file list, and diff line map | Review + Fix |
+| `create_review_worktrees` | Creates 3 isolated worktrees for review agents | Review |
+| `cleanup_review_worktrees` | Removes review worktrees with fallback cleanup | Review |
+| `post_full_review` | Posts summary comment + inline discussion threads for all findings | Review |
+| `post_review_summary` | Posts a top-level MR overview comment | Review + Fix |
+| `post_inline_thread` | Posts an inline discussion thread on a specific diff line | Review |
+| `create_linked_issue` | Creates a GitLab issue linked to the source MR | Review + Fix |
+| `map_diff_lines` | Parses a diff and returns exact changed line numbers per file | Review + Fix |
+| `fetch_mr_discussions` | Fetches all discussion threads with positions, bodies, and resolved status | Fix |
+| `reply_to_discussion` | Posts a reply to a specific discussion thread | Fix |
+| `resolve_discussion` | Resolves or unresolves a discussion thread | Fix |
+| `cleanup_omnifix_worktrees` | Removes OmniFix worktrees and temp branches | Fix |
 
 The MCP server is security-hardened and performance-optimized:
 - **Injection Protection:** All subprocess calls use `create_subprocess_exec` (argument list, no shell interpretation).
@@ -455,9 +493,10 @@ OmniReview/                                         # Marketplace root
 - [x] 3 parallel agents with worktree isolation
 - [x] Confidence scoring and cross-correlation
 - [x] 9-option post-review action menu
-- [x] MCP tool server (8 tools: fetch, worktrees, posting, issue creation, diff line mapping)
+- [x] MCP tool server (12 tools: fetch, worktrees, posting, issues, diff mapping, discussions, fix cleanup)
 - [x] Security-hardened subprocess execution (no shell injection)
 - [x] Diff line mapping for accurate inline thread placement
+- [x] OmniFix: automated review finding fixer (triage, fix, verify, resolve)
 - [ ] GitHub PR support via `gh` CLI
 - [ ] Cursor IDE integration
 - [ ] Gemini CLI agent compatibility
