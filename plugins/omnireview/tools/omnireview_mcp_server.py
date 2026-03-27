@@ -649,6 +649,90 @@ async def _create_linked_issue(
     }
 
 
+# ── Discussion Tools ─────────────────────────────────────
+
+
+async def _fetch_mr_discussions(mr_id: str, repo_root: str) -> dict:
+    """Fetch all discussion threads from an MR with structured data."""
+    try:
+        mr_id = validate_mr_id(mr_id)
+        repo_root = validate_repo_root(repo_root)
+    except ValueError as e:
+        return {"success": False, "error": str(e), "error_type": "validation_error"}
+
+    # Get MR IID
+    diff_refs = await _get_mr_diff_refs(mr_id, repo_root)
+    if not diff_refs or not diff_refs.get("success"):
+        return {
+            "success": False,
+            "error": diff_refs.get("error", f"Could not fetch MR !{mr_id}.") if diff_refs else f"Could not fetch MR !{mr_id}.",
+            "error_type": diff_refs.get("error_type", "mr_not_found") if diff_refs else "mr_not_found",
+        }
+    iid = diff_refs["iid"]
+
+    # Fetch all discussions (paginated)
+    r = await run_exec(
+        ["glab", "api", f"projects/:fullpath/merge_requests/{iid}/discussions", "--paginate"],
+        cwd=repo_root, timeout=120,
+    )
+    if r.returncode != 0:
+        return {
+            "success": False,
+            "error": f"Failed to fetch discussions: {r.stderr}",
+            "error_type": "api_error",
+        }
+
+    try:
+        raw_discussions = json.loads(r.stdout) if r.stdout.strip() else []
+    except json.JSONDecodeError:
+        return {
+            "success": False,
+            "error": "Failed to parse discussions JSON.",
+            "error_type": "parse_error",
+        }
+
+    # Parse into structured format
+    discussions = []
+    for disc in raw_discussions:
+        notes = [n for n in disc.get("notes", []) if not n.get("system", False)]
+        if not notes:
+            continue
+        first_note = notes[0]
+        position = first_note.get("position") or {}
+
+        discussions.append({
+            "id": disc.get("id", ""),
+            "resolvable": disc.get("resolvable", False),
+            "resolved": disc.get("resolved", False),
+            "type": "inline" if position and position.get("new_path") else "general",
+            "file_path": position.get("new_path"),
+            "line_number": position.get("new_line"),
+            "body": first_note.get("body", ""),
+            "author": first_note.get("author", {}).get("username", ""),
+            "created_at": first_note.get("created_at", ""),
+            "replies": [
+                {
+                    "author": n.get("author", {}).get("username", ""),
+                    "body": n.get("body", ""),
+                    "created_at": n.get("created_at", ""),
+                }
+                for n in notes[1:]
+            ],
+        })
+
+    unresolved = sum(1 for d in discussions if d["resolvable"] and not d["resolved"])
+    resolved = sum(1 for d in discussions if d["resolvable"] and d["resolved"])
+
+    return {
+        "success": True,
+        "mr_id": mr_id,
+        "discussions": discussions,
+        "total": len(discussions),
+        "unresolved": unresolved,
+        "resolved": resolved,
+    }
+
+
 # ── FastMCP Server ────────────────────────────────────────
 
 from mcp.server.fastmcp import FastMCP
@@ -799,6 +883,21 @@ async def create_linked_issue(
         repo_root: Absolute path to the git repository root
     """
     result = await _create_linked_issue(mr_id, title, description, labels, repo_root)
+    return json.dumps(result, indent=2)
+
+
+@mcp_server.tool()
+async def fetch_mr_discussions(mr_id: str, repo_root: str) -> str:
+    """Fetch all discussion threads from a GitLab MR with structured data.
+
+    Returns discussions with type (inline/general), file positions, bodies,
+    replies, and resolved status. Uses --paginate for complete results.
+
+    Args:
+        mr_id: Merge request number
+        repo_root: Absolute path to the git repository root
+    """
+    result = await _fetch_mr_discussions(mr_id, repo_root)
     return json.dumps(result, indent=2)
 
 
