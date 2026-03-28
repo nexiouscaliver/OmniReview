@@ -21,12 +21,12 @@ This repo has two layers: the **marketplace root** and the **plugin** inside it.
     skills/
       omnireview-gitlab/                ← Review skill (7-phase review workflow)
         SKILL.md
-        references/                     ← 4 files: 3 agent prompts + consolidation guide
+        references/                     ← 5 files: 3 agent prompts + consolidation guide + posting guide
       omnifix-gitlab/                   ← Fix skill (7-phase fix workflow)
         SKILL.md
-        references/                     ← 3 files: triage, fix, verify agent prompts
+        references/                     ← 5 files: 3 agent prompts + approval guide + commit/post guide
     tools/omnireview_mcp_server.py      ← Python MCP server (FastMCP, 12 tools)
-    tests/                              ← 92 unit tests
+    tests/                              ← 99 unit tests
 ```
 
 The marketplace wrapper exists because `claude plugin marketplace add` requires plugins in subdirectories — it doesn't support a plugin at repo root.

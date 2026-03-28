@@ -197,3 +197,97 @@ class TestFetchMrDataValidationErrors:
         assert result["success"] is False
         assert result["error_type"] == "validation_error"
         assert "repo_root must be absolute" in result["error"]
+
+
+class TestCharacterTruncation:
+    """Character-based diff truncation (MAX_DIFF_CHARS)."""
+
+    @patch("omnireview_mcp_server.run_exec", new_callable=AsyncMock)
+    def test_diff_truncated_by_chars(self, mock_run):
+        """Diff under MAX_DIFF_LINES but over MAX_DIFF_CHARS gets truncated."""
+        from omnireview_mcp_server import MAX_DIFF_CHARS
+
+        # Build a diff that is under 10K lines but exceeds MAX_DIFF_CHARS
+        # Each line is ~200 chars; 1000 lines = ~200K chars > 150K limit
+        long_line = "+" + ("x" * 198) + "\n"
+        large_diff = (
+            "+++ b/bigfile.py\n@@ -1 +1 @@\n"
+            + long_line * 1000
+        )
+        assert large_diff.count('\n') < 10000, "diff must be under MAX_DIFF_LINES"
+        assert len(large_diff) > MAX_DIFF_CHARS, "diff must exceed MAX_DIFF_CHARS"
+
+        mock_run.side_effect = _build_side_effects(diff_stdout=large_diff)
+
+        repo = "/tmp"
+        git_dir = os.path.join(repo, ".git")
+        created_git = False
+        if not os.path.isdir(git_dir):
+            os.makedirs(git_dir, exist_ok=True)
+            created_git = True
+
+        try:
+            result = asyncio.run(_fetch_mr_data("136", repo))
+        finally:
+            if created_git:
+                os.rmdir(git_dir)
+
+        assert result["success"] is True
+        assert result["diff_truncated"] is True
+        assert len(result["diff"]) < len(large_diff)
+        assert "TRUNCATED" in result["diff"]
+
+    @patch("omnireview_mcp_server.run_exec", new_callable=AsyncMock)
+    def test_diff_line_map_complete_despite_char_truncation(self, mock_run):
+        """diff_line_map is parsed from raw diff before char truncation."""
+        from omnireview_mcp_server import MAX_DIFF_CHARS
+
+        long_line = "+" + ("x" * 198) + "\n"
+        large_diff = (
+            "+++ b/bigfile.py\n@@ -1 +1 @@\n"
+            + long_line * 1000
+        )
+        assert len(large_diff) > MAX_DIFF_CHARS
+
+        mock_run.side_effect = _build_side_effects(diff_stdout=large_diff)
+
+        repo = "/tmp"
+        git_dir = os.path.join(repo, ".git")
+        created_git = False
+        if not os.path.isdir(git_dir):
+            os.makedirs(git_dir, exist_ok=True)
+            created_git = True
+
+        try:
+            result = asyncio.run(_fetch_mr_data("136", repo))
+        finally:
+            if created_git:
+                os.rmdir(git_dir)
+
+        assert result["success"] is True
+        # diff_line_map should have the file from the raw diff
+        assert "bigfile.py" in result["diff_line_map"]
+
+    @patch("omnireview_mcp_server.run_exec", new_callable=AsyncMock)
+    def test_small_diff_not_truncated(self, mock_run):
+        """A small diff stays intact (no character truncation applied)."""
+        small_diff = "+++ b/small.py\n@@ -1 +1 @@\n-old\n+new\n"
+
+        mock_run.side_effect = _build_side_effects(diff_stdout=small_diff)
+
+        repo = "/tmp"
+        git_dir = os.path.join(repo, ".git")
+        created_git = False
+        if not os.path.isdir(git_dir):
+            os.makedirs(git_dir, exist_ok=True)
+            created_git = True
+
+        try:
+            result = asyncio.run(_fetch_mr_data("136", repo))
+        finally:
+            if created_git:
+                os.rmdir(git_dir)
+
+        assert result["success"] is True
+        assert result["diff_truncated"] is False
+        assert result["diff"] == small_diff

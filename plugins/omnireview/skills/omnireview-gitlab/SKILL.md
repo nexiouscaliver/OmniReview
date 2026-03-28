@@ -89,6 +89,29 @@ git fetch origin {source_branch} {target_branch}
 git log --oneline origin/{target_branch}..origin/{source_branch}
 ```
 
+### Large Diff Strategy
+
+When `diff_line_count` is high (>3000 lines) or `diff_truncated` is true:
+
+1. **Don't inject the full diff into agent prompts.** Save the diff to a temp file and give agents the file path. They can read sections as needed.
+2. **Provide a diff summary instead.** Use `files_changed` and `diff_line_map` to create a per-file summary table:
+   ```
+   | File | Added Lines | Hunks |
+   |------|-------------|-------|
+   | src/app.py | 42 | 3 |
+   | tests/test_app.py | 28 | 2 |
+   ```
+3. **Agents explore in worktrees.** With the summary + worktree access, agents can read full files and understand context without the raw diff consuming their context window.
+4. **Save diff to temp file pattern:**
+   ```bash
+   # Save diff for agents to read on-demand
+   echo "$DIFF_TEXT" > /tmp/omni_mr{id}_diff.txt
+   # Give agents the path, not the content
+   ```
+5. **Clean up temp files in Phase 7** alongside worktree cleanup.
+
+This approach reduces agent context usage by 50-80% on large MRs while preserving full review quality.
+
 ---
 
 ## Phase 2: Create 3 Worktrees
@@ -181,39 +204,9 @@ For each agent, fill the template placeholders:
 
 ## Phase 4: Consolidation
 
-Follow `./references/consolidation-guide.md` for the full algorithm.
+**Threshold: 70.** Only findings with confidence >= 70 appear in the final report.
 
-### Confidence Scoring
-
-Each agent assigns confidence (0-100) per finding:
-
-| Score | Meaning | Threshold |
-|-------|---------|-----------|
-| 90-100 | Verified with code evidence | Include |
-| 70-89 | Strong signal, likely real | Include |
-| 50-69 | Possible, needs judgment | Filtered out |
-| < 50 | Noise | Filtered out |
-
-**Threshold: 70.** Only findings >= 70 appear in the final report.
-
-### Cross-Correlation
-
-- Same area flagged by 2 agents: **+15 confidence** (cap 100)
-- Same area flagged by 3 agents: **+25 confidence** (cap 100)
-- Contradictory findings: Present both, mark "needs human judgment"
-
-### False Positive Auto-Reduction (-30 confidence)
-
-- Pre-existing issues (code predates this MR per `git blame`)
-- Linter/CI-catchable issues
-- Pure style nitpicks without functional impact
-- Issues already resolved in MR discussions
-
-### Deduplication
-
-- Group by file:line proximity (within 5 lines = same area)
-- Merge overlapping findings, keep highest severity
-- Preserve unique insights from each agent
+**REQUIRED REFERENCE:** `./references/consolidation-guide.md` — you MUST read this before consolidating. Contains the full algorithm: confidence scoring, cross-correlation (+15 for 2 agents, +25 for 3), false positive auto-reduction (-30), deduplication, verdict logic, report template, and agent agreement matrix. Do NOT attempt consolidation from memory — the algorithm has specific rules that must be followed exactly.
 
 ---
 
@@ -283,117 +276,9 @@ Wait for user choice. Execute chosen action(s). Return to menu until user select
 
 ### Option 1: Full Review Post (Recommended)
 
-This is the most common action. It posts everything in one go:
+Post summary comment + individual inline threads for each finding >= 70 confidence. Each finding gets its own thread for independent resolution.
 
-1. Post the **summary comment** (overview template below) as a top-level MR note.
-2. For **EACH finding** with confidence >= 70, post a separate **inline discussion thread** on the relevant diff line.
-3. Report back: "Posted summary comment + {N} inline discussion threads"
-
-**Do NOT batch findings.** Each finding gets its own thread so the MR author can resolve them independently. Multiple threads on the same file = expected and encouraged.
-
-**Implementation:** Use the `mcp__omnireview__post_full_review` tool which handles the summary and all inline threads efficiently in a single tool call.
-
-**Line numbers:** Use the `diff_line_map` from the `fetch_mr_data` response (Phase 1) to get valid line numbers for each file. The `added_lines` array contains exact line numbers where code was added — use these for `line_number` in findings. Do NOT call `map_diff_lines` separately — the data is already available from Phase 1.
-
-### Summary Comment Template
-
-The summary is an **overview** — a high-level snapshot for anyone (author, reviewer, PM) to quickly understand the MR state. Keep it concise. The detail lives in the inline threads.
-
-```markdown
-## OmniReview
-
-**Verdict:** {APPROVE | APPROVE_WITH_FIXES | REQUEST_CHANGES | BLOCK}
-
-### Overview
-
-{2-4 sentences: what this MR does, the overall quality assessment, and the key risk areas if any}
-
-### At a Glance
-
-| | Count |
-|---|---|
-| Critical | {N} |
-| Important | {N} |
-| Minor | {N} |
-
-### Strengths
-{Top 2-3 things done well — brief, specific}
-
-### Key Concerns
-{Top 2-3 most important findings — one line each, referencing the inline threads for detail}
-
-### Security
-{1-2 sentences: security posture assessment. "No security concerns found." or "See inline threads for {N} security findings."}
-
----
-*Reviewed by 3 parallel agents (MR Analyst, Codebase Reviewer, Security Reviewer)*
-*Confidence threshold: 70/100 | {N} findings above threshold*
-```
-
-### Inline Discussion Thread Template
-
-Each thread is **technical and actionable**. One thread per finding. Don't hold back — post as many threads as there are findings.
-
-```markdown
-**{SEVERITY}** — {short_title}
-
-**What:** {1-2 sentence description of the issue}
-
-**Why it matters:** {impact — what could go wrong}
-
-**Recommendation:**
-\`\`\`{language}
-{code suggestion or description of fix}
-\`\`\`
-
-Confidence: {score}/100 | Found by: {agent_name(s)}
-```
-
-**For security findings, also include:**
-```markdown
-**Attack scenario:** {how this could be exploited}
-```
-
-**Rules for inline threads:**
-- Post each finding as a **separate** discussion thread on the relevant diff line
-- If a finding spans multiple lines, place it on the most relevant line
-- Multiple threads on the same file = expected and encouraged
-- Don't merge or batch findings — each gets its own thread for independent resolution
-- Severity tag at the start: **Critical**, **Important**, or **Minor**
-- Include code suggestions in fenced blocks where applicable
-
-### Action Commands
-
-**If MCP tools are available** (recommended — handles all GitLab API complexity automatically):
-
-| Action | MCP Tool |
-|--------|----------|
-| Full review post | `mcp__omnireview__post_full_review(mr_id, summary, findings_json, repo_root)` |
-| Summary only | `mcp__omnireview__post_review_summary(mr_id, summary, repo_root)` |
-| Inline thread | `mcp__omnireview__post_inline_thread(mr_id, file_path, line_number, body, repo_root)` |
-| Create issue | `mcp__omnireview__create_linked_issue(mr_id, title, description, labels, repo_root)` |
-
-For `post_full_review`, the `findings` parameter is a JSON string of an array:
-```json
-[
-  {"file_path": "src/app.py", "line_number": 42, "body": "**Important** — Missing null check\n\n**What:** ..."},
-  {"file_path": "src/app.py", "line_number": 87, "body": "**Minor** — Magic number\n\n**What:** ..."}
-]
-```
-
-The MCP tools automatically fetch diff position SHAs, URL-encode the project path, and construct the GitLab API request. The model only needs to provide the text and line numbers.
-
-**Fallback (no MCP server):**
-
-| Action | Command |
-|--------|---------|
-| Summary | `glab mr note {id} -m "{summary}"` |
-| Inline thread | `glab api projects/:fullpath/merge_requests/{iid}/discussions --method POST --raw-field "body={text}" --raw-field "position[position_type]=text" --raw-field "position[base_sha]={sha}" --raw-field "position[head_sha]={sha}" --raw-field "position[start_sha]={sha}" --raw-field "position[new_path]={file}" --raw-field "position[new_line]={line}"` |
-| Create issue | `glab issue create -t "[MR !{id}] {title}" -d "{desc}" --linked-mr {id} --no-editor` |
-| Approve | `glab mr approve {id}` |
-| Open browser | `glab mr view {id} -w` |
-
-**No AI attribution in any posted content.** Write as a standard code review comment.
+**REQUIRED REFERENCE:** `./references/posting-guide.md` — you MUST read this before posting anything. Contains the summary comment template, inline thread template, MCP tool call syntax (`post_full_review` findings JSON format), and bash fallback commands. Do NOT improvise posting format — use the exact templates from the reference.
 
 ---
 

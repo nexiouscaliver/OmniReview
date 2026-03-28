@@ -67,6 +67,17 @@ When agents reach different conclusions about the same area:
 
 ---
 
+## Step 3e: False Positive Auto-Reduction
+
+Apply a -30 confidence penalty to findings that match any of these patterns:
+
+- Pre-existing issues (code predates this MR per `git blame`)
+- Linter/CI-catchable issues (should be caught by tooling, not review)
+- Pure style nitpicks without functional impact
+- Issues already resolved in MR discussions
+
+---
+
 ## Step 4: Deduplication
 
 When findings overlap:
@@ -165,7 +176,7 @@ Use this template:
 **Findings Summary:** {N} Critical, {N} Important, {N} Minor | **Confidence range:** {min}-{max}
 ```
 
-**Note:** When the user selects "Full review post" (option 1) from the action menu, use the **Summary Comment Template** and **Inline Discussion Thread Template** from SKILL.md Phase 6 to format the posted content. The summary is an overview, the inline threads are technical and actionable — one per finding, never batched.
+**Note:** When the user selects "Full review post" (option 1) from the action menu, use the **Summary Comment Template** and **Inline Discussion Thread Template** from `./posting-guide.md` to format the posted content. The summary is an overview, the inline threads are technical and actionable — one per finding, never batched.
 
 ---
 

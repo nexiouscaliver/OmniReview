@@ -197,58 +197,7 @@ git worktree prune
 
 **CRITICAL: No code changes until user explicitly approves.**
 
-### Presentation Format
-
-```
-## Triage Results: MR !{id}
-
-### VALID ({N} findings — recommended to fix)
-
-1. {file}:{line} — {short description}
-   Confidence: {score} | Proposed fix: {summary}
-
-### INVALID ({N} findings — recommended to skip)
-
-2. {file}:{line} — {short description}
-   Reason: {why it's a false positive}
-
-### NEEDS_HUMAN ({N} findings — your call)
-
-3. {file}:{line} — {short description}
-   Reason: {what's unclear}
-
----
-
-What would you like to do?
-1. Fix all VALID findings ({N} findings)
-2. Select which to fix
-3. Fix all including NEEDS_HUMAN ({N} findings)
-4. Cancel — don't fix anything
-```
-
-### Additional Options
-
-**Auto-resolve fixed threads?**
-```
-Auto-resolve fixed threads? (Recommended: No — let the original reviewer verify)
-1. Yes — resolve threads after posting fix reply
-2. No — only post fix reply, let reviewer resolve manually (default)
-```
-
-**Commit strategy:**
-```
-Commit strategy:
-1. Single commit for all fixes (default)
-2. One commit per fix (easier to revert individually)
-```
-
-### User Can
-
-- Approve all VALID — proceed to Phase 4
-- Select individual findings — proceed with selection
-- Override an INVALID verdict — add it to the fix list
-- Edit a proposed fix — modify before applying
-- Cancel entirely
+**REQUIRED REFERENCE:** `./references/approval-guide.md` — you MUST read this before presenting triage results. Contains the exact presentation format (VALID/INVALID/NEEDS_HUMAN sections), auto-resolve options, commit strategy options, and the full user action matrix. Do NOT present results without loading this reference — the format and option text must match exactly.
 
 ---
 
@@ -275,6 +224,14 @@ Dispatch a single implementer subagent with the fix-agent-prompt template:
 - `{WORKTREE_PATH}` — **Absolute** path to writable worktree
 - `{APPROVED_FIXES_JSON}` — JSON array of approved fixes from triage
 - `{TEST_COMMAND}` — Test command (see discovery order below)
+
+**CRITICAL: Dispatch with write permissions.** The fix agent needs Write and Edit tools to modify files in the worktree. Use `mode: "acceptEdits"` when dispatching:
+
+```
+Agent(prompt="...", mode="acceptEdits", subagent_type="general-purpose")
+```
+
+Without `mode: "acceptEdits"`, the subagent may be blocked by the user's permission settings and unable to edit files. If the fix agent returns `BLOCKED` due to permissions, fall back to applying fixes directly in the main agent context (read the proposed fixes and apply them with Edit/Write tools in the worktree yourself).
 
 ### Test Command Discovery
 
@@ -365,89 +322,13 @@ When verification returns `NEEDS_REWORK`:
 
 **Goal:** Commit fixes and update all discussion threads.
 
-### Race Condition Check
+**REQUIRED REFERENCE:** `./references/commit-and-post-guide.md` — you MUST read this before committing or posting. Contains the race condition check procedure, commit template (with `PRE_COMMIT_ALLOW_NO_CONFIG=1`), push command, thread reply MCP tool calls, resolve MCP tool calls, and summary comment template. Do NOT commit or post without loading this reference — the commit format and thread reply pattern must be followed exactly.
 
-Before pushing, check for source branch drift:
-1. `git fetch origin {source_branch}` in the fix worktree
-2. Compare `origin/{source_branch}` HEAD with the worktree's base commit
-3. If they differ:
-   - Warn: "Source branch has {N} new commits since we started."
-   - Offer: (a) rebase fixes on new HEAD, (b) abort push, (c) create a separate MR
-4. **Never force-push.** If rebase has conflicts, abort and let user resolve manually.
-
-### Commit
-
-Stage and commit in the fix worktree:
-
-```bash
-# In .worktrees/omnifix-{mr_id}
-git add -A
-git commit -m "fix: resolve {N} review findings from MR !{mr_id}
-
-Fixes:
-- {file}:{line} — {description}
-- {file}:{line} — {description}"
-```
-
-No mention of OmniFix, AI, or automation in the commit message.
-
-### Push
-
-**Ask user before pushing — never auto-push.**
-
-If approved:
-```bash
-git push origin omnifix-temp-{mr_id}:{source_branch}
-```
-
-### Post Thread Replies
-
-For each fixed finding, follow the `_post_full_review` error-handling pattern — collect errors per thread, continue with remaining, report summary:
-
-```
-mcp__omnireview__reply_to_discussion(
-    mr_id="{id}",
-    discussion_id="{discussion_id}",
-    body="Fixed in commit {sha}: {description}",
-    repo_root="{cwd}"
-)
-```
-
-Retry once for 5xx errors with 2-second delay.
-
-### Resolve Threads (if user opted in at Phase 3)
-
-```
-mcp__omnireview__resolve_discussion(
-    mr_id="{id}",
-    discussion_id="{discussion_id}",
-    resolved=true,
-    repo_root="{cwd}"
-)
-```
-
-### Summary Comment
-
-Post a summary comment on the MR:
-
-```markdown
-## OmniFix Summary: {N} findings processed
-
-| Finding | File | Status |
-|---------|------|--------|
-| {description} | {file}:{line} | Fixed in {sha} |
-| {description} | {file}:{line} | Skipped ({reason}) |
-```
-
-No AI attribution in any posted content.
-
-### Post Results
-
-```
-Reply results: {N}/{M} succeeded
-Resolve results: {N}/{M} succeeded
-Errors: [list with discussion_id and error message]
-```
+Key rules:
+- **Race condition check** before push — fetch and compare source branch HEAD
+- **Never force-push** — abort if rebase has conflicts
+- **Ask user before pushing** — never auto-push
+- **No AI attribution** in commits or posted content
 
 ---
 
@@ -476,6 +357,14 @@ rm -rf .worktrees/omnifix-{mr_id} .worktrees/omnifix-triage-{mr_id}-* 2>/dev/nul
 git worktree prune
 git branch -D omnifix-temp-{mr_id} 2>/dev/null
 ```
+
+**Return to repo root after cleanup:**
+
+```bash
+cd {repo_root}
+```
+
+If any bash commands during Phases 4-6 changed the working directory into the worktree, this ensures the main agent returns to the repo root. Failure to do this leaves the agent's working directory pointing at a deleted path.
 
 ---
 
