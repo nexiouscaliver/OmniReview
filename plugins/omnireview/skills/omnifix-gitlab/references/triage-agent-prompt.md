@@ -92,12 +92,14 @@ Return a JSON array with one verdict per finding:
 
 ## Confidence Scale
 
-| Range | Meaning |
-|-------|---------|
-| 90-100 | Verified with code evidence, high certainty |
-| 70-89 | Strong signal, likely correct |
-| 50-69 | Possible but uncertain |
-| <50 | Low confidence, likely noise |
+| Range | Meaning | Verdict Implication |
+|-------|---------|---------------------|
+| 90-100 | Verified with code evidence, high certainty | VALID or INVALID |
+| 70-89 | Strong signal, likely correct | VALID or INVALID |
+| 50-69 | Possible but uncertain | **Must be NEEDS_HUMAN** |
+| <50 | Low confidence, likely noise | **Must be NEEDS_HUMAN or INVALID** |
+
+**Threshold rule:** If your confidence is below 70, you MUST use `NEEDS_HUMAN` (not `VALID`). A finding you're not confident about should not be auto-fixed — it needs a human to decide. This prevents low-confidence fixes from being applied automatically.
 
 ---
 
