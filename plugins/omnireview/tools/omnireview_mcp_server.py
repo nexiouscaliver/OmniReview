@@ -714,12 +714,20 @@ async def _fetch_mr_discussions(mr_id: str, repo_root: str) -> dict:
             continue
         first_note = notes[0]
         position = first_note.get("position") or {}
+        note_type = first_note.get("type", "")
+
+        # Determine if this is an inline discussion:
+        # 1. Primary: position data has new_path (most reliable)
+        # 2. Fallback: note type is "DiffNote" (GitLab's type for inline comments)
+        has_position = bool(position and position.get("new_path"))
+        is_diff_note = note_type == "DiffNote"
+        is_inline = has_position or is_diff_note
 
         discussions.append({
             "id": disc.get("id", ""),
             "resolvable": disc.get("resolvable", False),
             "resolved": disc.get("resolved", False),
-            "type": "inline" if position and position.get("new_path") else "general",
+            "type": "inline" if is_inline else "general",
             "file_path": position.get("new_path"),
             "line_number": position.get("new_line"),
             "body": first_note.get("body", ""),

@@ -457,3 +457,191 @@ class TestResolveDiscussion:
         ))
         assert result["success"] is False
         assert result["error_type"] == "validation_error"
+
+
+# ── TestDiffNoteTypeFallback Tests ───────────────────────
+
+
+class TestDiffNoteTypeFallback:
+    @patch("omnireview_mcp_server.run_exec", new_callable=AsyncMock)
+    def test_diffnote_without_position_classified_as_inline(self, mock_run, tmp_path):
+        """DiffNote with position=None should be classified as inline via type fallback."""
+        from omnireview_mcp_server import _fetch_mr_discussions
+        repo = _make_repo(tmp_path)
+
+        discussions_json = json.dumps([
+            {
+                "id": "disc-diffnote-no-pos",
+                "individual_note": False,
+                "resolvable": True,
+                "resolved": False,
+                "notes": [
+                    {
+                        "id": 2001,
+                        "type": "DiffNote",
+                        "body": "Missing null check here",
+                        "author": {"username": "reviewer1"},
+                        "system": False,
+                        "created_at": "2026-03-28T10:00:00Z",
+                        "position": None,
+                    }
+                ],
+            }
+        ])
+
+        call_count = 0
+
+        def side_effect(args, cwd=None, timeout=60):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _make_result(0, SAMPLE_MR_JSON)
+            return _make_result(0, discussions_json)
+
+        mock_run.side_effect = side_effect
+
+        result = asyncio.run(_fetch_mr_discussions("136", repo))
+        assert result["success"] is True
+        assert result["total"] == 1
+        disc = result["discussions"][0]
+        assert disc["type"] == "inline"
+        assert disc["file_path"] is None
+        assert disc["line_number"] is None
+
+    @patch("omnireview_mcp_server.run_exec", new_callable=AsyncMock)
+    def test_diffnote_with_position_uses_position_data(self, mock_run, tmp_path):
+        """DiffNote with full position data should be inline with correct file/line."""
+        from omnireview_mcp_server import _fetch_mr_discussions
+        repo = _make_repo(tmp_path)
+
+        discussions_json = json.dumps([
+            {
+                "id": "disc-diffnote-with-pos",
+                "individual_note": False,
+                "resolvable": True,
+                "resolved": False,
+                "notes": [
+                    {
+                        "id": 2002,
+                        "type": "DiffNote",
+                        "body": "Rename this variable",
+                        "author": {"username": "reviewer2"},
+                        "system": False,
+                        "created_at": "2026-03-28T11:00:00Z",
+                        "position": {
+                            "new_path": "src/models.py",
+                            "new_line": 77,
+                            "position_type": "text",
+                        },
+                    }
+                ],
+            }
+        ])
+
+        call_count = 0
+
+        def side_effect(args, cwd=None, timeout=60):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _make_result(0, SAMPLE_MR_JSON)
+            return _make_result(0, discussions_json)
+
+        mock_run.side_effect = side_effect
+
+        result = asyncio.run(_fetch_mr_discussions("136", repo))
+        assert result["success"] is True
+        assert result["total"] == 1
+        disc = result["discussions"][0]
+        assert disc["type"] == "inline"
+        assert disc["file_path"] == "src/models.py"
+        assert disc["line_number"] == 77
+
+    @patch("omnireview_mcp_server.run_exec", new_callable=AsyncMock)
+    def test_regular_note_without_position_is_general(self, mock_run, tmp_path):
+        """Note with type=null and no position should be classified as general."""
+        from omnireview_mcp_server import _fetch_mr_discussions
+        repo = _make_repo(tmp_path)
+
+        discussions_json = json.dumps([
+            {
+                "id": "disc-regular-note",
+                "individual_note": True,
+                "resolvable": False,
+                "resolved": False,
+                "notes": [
+                    {
+                        "id": 2003,
+                        "type": None,
+                        "body": "Overall looks good to me",
+                        "author": {"username": "reviewer3"},
+                        "system": False,
+                        "created_at": "2026-03-28T12:00:00Z",
+                    }
+                ],
+            }
+        ])
+
+        call_count = 0
+
+        def side_effect(args, cwd=None, timeout=60):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _make_result(0, SAMPLE_MR_JSON)
+            return _make_result(0, discussions_json)
+
+        mock_run.side_effect = side_effect
+
+        result = asyncio.run(_fetch_mr_discussions("136", repo))
+        assert result["success"] is True
+        assert result["total"] == 1
+        disc = result["discussions"][0]
+        assert disc["type"] == "general"
+        assert disc["file_path"] is None
+        assert disc["line_number"] is None
+
+    @patch("omnireview_mcp_server.run_exec", new_callable=AsyncMock)
+    def test_diffnote_missing_position_key_entirely(self, mock_run, tmp_path):
+        """DiffNote with no position key at all should be classified as inline."""
+        from omnireview_mcp_server import _fetch_mr_discussions
+        repo = _make_repo(tmp_path)
+
+        discussions_json = json.dumps([
+            {
+                "id": "disc-diffnote-no-key",
+                "individual_note": False,
+                "resolvable": True,
+                "resolved": False,
+                "notes": [
+                    {
+                        "id": 2004,
+                        "type": "DiffNote",
+                        "body": "Add docstring",
+                        "author": {"username": "reviewer4"},
+                        "system": False,
+                        "created_at": "2026-03-28T13:00:00Z",
+                        # No "position" key at all
+                    }
+                ],
+            }
+        ])
+
+        call_count = 0
+
+        def side_effect(args, cwd=None, timeout=60):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _make_result(0, SAMPLE_MR_JSON)
+            return _make_result(0, discussions_json)
+
+        mock_run.side_effect = side_effect
+
+        result = asyncio.run(_fetch_mr_discussions("136", repo))
+        assert result["success"] is True
+        assert result["total"] == 1
+        disc = result["discussions"][0]
+        assert disc["type"] == "inline"
+        assert disc["file_path"] is None
+        assert disc["line_number"] is None
