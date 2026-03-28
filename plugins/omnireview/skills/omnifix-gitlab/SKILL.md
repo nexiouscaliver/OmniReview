@@ -197,9 +197,7 @@ git worktree prune
 
 **CRITICAL: No code changes until user explicitly approves.**
 
-Read `./references/approval-guide.md` for presentation format, auto-resolve options, commit strategy options, and the full user action matrix.
-
-Present VALID/INVALID/NEEDS_HUMAN findings. User chooses: fix all VALID, select which to fix, include NEEDS_HUMAN, or cancel. Also ask about auto-resolve (default: no) and commit strategy (default: single commit).
+**REQUIRED REFERENCE:** `./references/approval-guide.md` — you MUST read this before presenting triage results. Contains the exact presentation format (VALID/INVALID/NEEDS_HUMAN sections), auto-resolve options, commit strategy options, and the full user action matrix. Do NOT present results without loading this reference — the format and option text must match exactly.
 
 ---
 
@@ -324,7 +322,7 @@ When verification returns `NEEDS_REWORK`:
 
 **Goal:** Commit fixes and update all discussion threads.
 
-Read `./references/commit-and-post-guide.md` for the full procedure: race condition check, commit template (with `PRE_COMMIT_ALLOW_NO_CONFIG=1`), push command, thread reply pattern, resolve pattern, and summary comment template.
+**REQUIRED REFERENCE:** `./references/commit-and-post-guide.md` — you MUST read this before committing or posting. Contains the race condition check procedure, commit template (with `PRE_COMMIT_ALLOW_NO_CONFIG=1`), push command, thread reply MCP tool calls, resolve MCP tool calls, and summary comment template. Do NOT commit or post without loading this reference — the commit format and thread reply pattern must be followed exactly.
 
 Key rules:
 - **Race condition check** before push — fetch and compare source branch HEAD

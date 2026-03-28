@@ -206,7 +206,7 @@ For each agent, fill the template placeholders:
 
 **Threshold: 70.** Only findings with confidence >= 70 appear in the final report.
 
-Follow `./references/consolidation-guide.md` for the full algorithm — confidence scoring, cross-correlation (+15 for 2 agents, +25 for 3), false positive auto-reduction, deduplication, verdict logic, and report composition.
+**REQUIRED REFERENCE:** `./references/consolidation-guide.md` — you MUST read this before consolidating. Contains the full algorithm: confidence scoring, cross-correlation (+15 for 2 agents, +25 for 3), false positive auto-reduction (-30), deduplication, verdict logic, report template, and agent agreement matrix. Do NOT attempt consolidation from memory — the algorithm has specific rules that must be followed exactly.
 
 ---
 
@@ -278,7 +278,7 @@ Wait for user choice. Execute chosen action(s). Return to menu until user select
 
 Post summary comment + individual inline threads for each finding >= 70 confidence. Each finding gets its own thread for independent resolution.
 
-For templates, formatting rules, MCP tool calls, and bash fallback commands, read `./references/posting-guide.md` before posting.
+**REQUIRED REFERENCE:** `./references/posting-guide.md` — you MUST read this before posting anything. Contains the summary comment template, inline thread template, MCP tool call syntax (`post_full_review` findings JSON format), and bash fallback commands. Do NOT improvise posting format — use the exact templates from the reference.
 
 ---
 
