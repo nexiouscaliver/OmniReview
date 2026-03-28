@@ -11,6 +11,7 @@ import shutil
 
 WORKTREE_TYPES = ["analyst", "codebase", "security"]
 MAX_DIFF_LINES = 10000
+MAX_DIFF_CHARS = 150000
 
 # ── Input Validation ──────────────────────────────────────
 
@@ -174,16 +175,30 @@ def parse_diff_line_map(diff_text: str) -> dict:
 
 
 def truncate_diff_if_needed(diff_text: str, line_count: int) -> tuple:
-    """Truncate diff if it exceeds MAX_DIFF_LINES."""
-    if line_count <= MAX_DIFF_LINES:
-        return diff_text, False
-    lines = diff_text.split('\n')[:MAX_DIFF_LINES]
-    truncated = '\n'.join(lines)
-    truncated += (
-        f"\n\n... [TRUNCATED: {line_count} total lines, "
-        f"showing first {MAX_DIFF_LINES}] ..."
-    )
-    return truncated, True
+    """Truncate diff if it exceeds MAX_DIFF_LINES or MAX_DIFF_CHARS."""
+    truncated = False
+    reason = ""
+
+    if line_count > MAX_DIFF_LINES:
+        lines = diff_text.split('\n')[:MAX_DIFF_LINES]
+        diff_text = '\n'.join(lines)
+        truncated = True
+        reason = f"{line_count} total lines, showing first {MAX_DIFF_LINES}"
+
+    if len(diff_text) > MAX_DIFF_CHARS:
+        original_chars = len(diff_text)
+        cut_point = diff_text.rfind('\n', 0, MAX_DIFF_CHARS)
+        if cut_point == -1:
+            cut_point = MAX_DIFF_CHARS
+        diff_text = diff_text[:cut_point]
+        truncated = True
+        char_reason = f"{len(diff_text)} of {original_chars} chars shown"
+        reason = f"{reason}; {char_reason}" if reason else char_reason
+
+    if truncated:
+        diff_text += f"\n\n... [TRUNCATED: {reason}] ..."
+
+    return diff_text, truncated
 
 
 # ── Tool Implementations ──────────────────────────────────
