@@ -5,6 +5,23 @@ All notable changes to OmniReview will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-03-29
+
+### Fixed
+- **Character-based diff truncation** (`MAX_DIFF_CHARS=150K`) — prevents MCP client overflow on large MRs where diff is under 10K lines but over 150K characters
+- **Inline discussion type detection** — `fetch_mr_discussions` now uses `DiffNote` note type as fallback when `position` data is missing from GitLab API response, fixing OmniFix misclassifying inline threads as general
+- **Fix agent permissions** — OmniFix Phase 4 now instructs `mode: "acceptEdits"` for fix subagent dispatch, preventing permission blocks
+- **Pre-commit hook in worktrees** — OmniFix Phase 6 now uses `PRE_COMMIT_ALLOW_NO_CONFIG=1` for worktree commits
+- **Working directory drift** — OmniFix Phase 7 now explicitly returns to repo root after cleanup
+- **Triage confidence threshold** — triage agent prompt now enforces `NEEDS_HUMAN` for confidence < 70, preventing low-confidence findings from being auto-fixed
+
+### Changed
+- `truncate_diff_if_needed` now checks both line count and character count
+- OmniReview SKILL.md adds "Large Diff Strategy" section for context-efficient agent dispatch
+- Triage agent prompt confidence scale now includes verdict implications
+
+---
+
 ## [1.3.0] - 2026-03-28
 
 ### Added

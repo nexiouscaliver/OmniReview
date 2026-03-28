@@ -26,7 +26,7 @@ This repo has two layers: the **marketplace root** and the **plugin** inside it.
         SKILL.md
         references/                     ← 3 files: triage, fix, verify agent prompts
     tools/omnireview_mcp_server.py      ← Python MCP server (FastMCP, 12 tools)
-    tests/                              ← 92 unit tests
+    tests/                              ← 99 unit tests
 ```
 
 The marketplace wrapper exists because `claude plugin marketplace add` requires plugins in subdirectories — it doesn't support a plugin at repo root.
